@@ -79,7 +79,7 @@ class SimpleEmailService
   * @param string $secretKey Secret key
   * @return void
   */
-  public function __construct($accessKey = null, $secretKey = null, $host = 'email.us-east-1.amazonaws.com') {
+  public function __construct($accessKey = null, $secretKey = null, $host = 'email.eu-west-1.amazonaws.com') {
     if ($accessKey !== null && $secretKey !== null) {
       $this->setAuth($accessKey, $secretKey);
     }
