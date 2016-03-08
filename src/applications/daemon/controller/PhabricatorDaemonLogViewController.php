@@ -3,19 +3,13 @@
 final class PhabricatorDaemonLogViewController
   extends PhabricatorDaemonController {
 
-  private $id;
-
-  public function willProcessRequest(array $data) {
-    $this->id = $data['id'];
-  }
-
-  public function processRequest() {
-    $request = $this->getRequest();
-    $user = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $request->getViewer();
+    $id = $request->getURIData('id');
 
     $log = id(new PhabricatorDaemonLogQuery())
-      ->setViewer($user)
-      ->withIDs(array($this->id))
+      ->setViewer($viewer)
+      ->withIDs(array($id))
       ->setAllowStatusWrites(true)
       ->executeOne();
     if (!$log) {
@@ -64,19 +58,11 @@ final class PhabricatorDaemonLogViewController
     }
 
     $header->addTag($tag);
-    $env_hash = PhabricatorEnv::calculateEnvironmentHash();
-    if ($log->getEnvHash() != $env_hash) {
-      $tag = id(new PHUITagView())
-        ->setType(PHUITagView::TYPE_STATE)
-        ->setBackgroundColor(PHUITagView::COLOR_YELLOW)
-        ->setName(pht('Stale Config'));
-      $header->addTag($tag);
-    }
 
     $properties = $this->buildPropertyListView($log);
 
     $event_view = id(new PhabricatorDaemonLogEventsView())
-      ->setUser($user)
+      ->setUser($viewer)
       ->setEvents($events);
 
     $event_panel = new PHUIObjectBoxView();

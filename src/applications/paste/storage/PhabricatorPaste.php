@@ -9,7 +9,9 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
     PhabricatorPolicyInterface,
     PhabricatorProjectInterface,
     PhabricatorDestructibleInterface,
-    PhabricatorApplicationTransactionInterface {
+    PhabricatorApplicationTransactionInterface,
+    PhabricatorSpacesInterface,
+    PhabricatorConduitResultInterface {
 
   protected $title;
   protected $authorPHID;
@@ -19,9 +21,15 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
   protected $viewPolicy;
   protected $editPolicy;
   protected $mailKey;
+  protected $status;
+  protected $spacePHID;
+
+  const STATUS_ACTIVE = 'active';
+  const STATUS_ARCHIVED = 'archived';
 
   private $content = self::ATTACHABLE;
   private $rawContent = self::ATTACHABLE;
+  private $snippet = self::ATTACHABLE;
 
   public static function initializeNewPaste(PhabricatorUser $actor) {
     $app = id(new PhabricatorApplicationQuery())
@@ -34,19 +42,35 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
 
     return id(new PhabricatorPaste())
       ->setTitle('')
+      ->setLanguage('')
+      ->setStatus(self::STATUS_ACTIVE)
       ->setAuthorPHID($actor->getPHID())
       ->setViewPolicy($view_policy)
-      ->setEditPolicy($edit_policy);
+      ->setEditPolicy($edit_policy)
+      ->setSpacePHID($actor->getDefaultSpacePHID())
+      ->attachRawContent(null);
+  }
+
+  public static function getStatusNameMap() {
+    return array(
+      self::STATUS_ACTIVE => pht('Active'),
+      self::STATUS_ARCHIVED => pht('Archived'),
+    );
   }
 
   public function getURI() {
-    return '/P'.$this->getID();
+    return '/'.$this->getMonogram();
+  }
+
+  public function getMonogram() {
+    return 'P'.$this->getID();
   }
 
   protected function getConfiguration() {
     return array(
       self::CONFIG_AUX_PHID => true,
       self::CONFIG_COLUMN_SCHEMA => array(
+        'status' => 'text32',
         'title' => 'text255',
         'language' => 'text64',
         'mailKey' => 'bytes20',
@@ -76,6 +100,10 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
   public function generatePHID() {
     return PhabricatorPHID::generateNewPHID(
       PhabricatorPastePastePHIDType::TYPECONST);
+  }
+
+  public function isArchived() {
+    return ($this->getStatus() == self::STATUS_ARCHIVED);
   }
 
   public function save() {
@@ -111,19 +139,20 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
     return $this;
   }
 
+  public function getSnippet() {
+    return $this->assertAttached($this->snippet);
+  }
+
+  public function attachSnippet(PhabricatorPasteSnippet $snippet) {
+    $this->snippet = $snippet;
+    return $this;
+  }
+
 /* -(  PhabricatorSubscribableInterface  )----------------------------------- */
 
 
   public function isAutomaticallySubscribed($phid) {
     return ($this->authorPHID == $phid);
-  }
-
-  public function shouldShowSubscribersProperty() {
-    return true;
-  }
-
-  public function shouldAllowSubscription($phid) {
-    return true;
   }
 
 
@@ -204,6 +233,55 @@ final class PhabricatorPaste extends PhabricatorPasteDAO
     AphrontRequest $request) {
 
     return $timeline;
+  }
+
+
+/* -(  PhabricatorSpacesInterface  )----------------------------------------- */
+
+
+  public function getSpacePHID() {
+    return $this->spacePHID;
+  }
+
+
+/* -(  PhabricatorConduitResultInterface  )---------------------------------- */
+
+
+  public function getFieldSpecificationsForConduit() {
+    return array(
+      id(new PhabricatorConduitSearchFieldSpecification())
+        ->setKey('title')
+        ->setType('string')
+        ->setDescription(pht('The title of the paste.')),
+      id(new PhabricatorConduitSearchFieldSpecification())
+        ->setKey('authorPHID')
+        ->setType('phid')
+        ->setDescription(pht('User PHID of the author.')),
+      id(new PhabricatorConduitSearchFieldSpecification())
+        ->setKey('language')
+        ->setType('string?')
+        ->setDescription(pht('Language to use for syntax highlighting.')),
+      id(new PhabricatorConduitSearchFieldSpecification())
+        ->setKey('status')
+        ->setType('string')
+        ->setDescription(pht('Active or arhived status of the paste.')),
+    );
+  }
+
+  public function getFieldValuesForConduit() {
+    return array(
+      'title' => $this->getTitle(),
+      'authorPHID' => $this->getAuthorPHID(),
+      'language' => nonempty($this->getLanguage(), null),
+      'status' => $this->getStatus(),
+    );
+  }
+
+  public function getConduitSearchAttachments() {
+    return array(
+      id(new PhabricatorPasteContentSearchEngineAttachment())
+        ->setAttachmentKey('content'),
+    );
   }
 
 }

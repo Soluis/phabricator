@@ -120,6 +120,10 @@ abstract class PhabricatorTestCase extends PhutilTestCase {
       'phabricator.base-uri',
       'http://phabricator.example.com');
 
+    $this->env->overrideEnvConfig(
+      'auth.email-domains',
+      array());
+
     // Tests do their own stubbing/voiding for events.
     $this->env->overrideEnvConfig('phabricator.silent', false);
   }
@@ -184,7 +188,7 @@ abstract class PhabricatorTestCase extends PhutilTestCase {
     $seed = $this->getNextObjectSeed();
 
     $user = id(new PhabricatorUser())
-      ->setRealName("Test User {$seed}}")
+      ->setRealName(pht('Test User %s', $seed))
       ->setUserName("test{$seed}")
       ->setIsApproved(1);
 
@@ -211,15 +215,17 @@ abstract class PhabricatorTestCase extends PhutilTestCase {
     if (!self::$testsAreRunning) {
       throw new Exception(
         pht(
-          'Executing test code outside of test execution! This code path can '.
-          'only be run during unit tests.'));
+          'Executing test code outside of test execution! '.
+          'This code path can only be run during unit tests.'));
     }
   }
 
   protected function requireBinaryForTest($binary) {
     if (!Filesystem::binaryExists($binary)) {
       $this->assertSkipped(
-        pht('No binary "%s" found on this system, skipping test.', $binary));
+        pht(
+          'No binary "%s" found on this system, skipping test.',
+          $binary));
     }
   }
 

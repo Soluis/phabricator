@@ -2,19 +2,6 @@
 
 abstract class PhabricatorHomeController extends PhabricatorController {
 
-  public function buildStandardPageResponse($view, array $data) {
-    $page = $this->buildStandardPageView();
-
-    $page->setBaseURI('/');
-    $page->setTitle(idx($data, 'title'));
-
-    $page->setGlyph("\xE2\x9A\x92");
-    $page->appendChild($view);
-
-    $response = new AphrontWebpageResponse();
-    return $response->setContent($page->render());
-  }
-
   public function buildNav() {
     $user = $this->getRequest()->getUser();
 
@@ -74,7 +61,7 @@ abstract class PhabricatorHomeController extends PhabricatorController {
 
     $nav->addFilter(
       '',
-      pht('Customize Applications...'),
+      pht('Customize Menu...'),
       '/settings/panel/home/');
 
     $nav->addClass('phabricator-side-menu-home');

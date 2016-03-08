@@ -6,9 +6,9 @@ abstract class PhabricatorApplicationTransactionReplyHandler
   abstract public function getObjectPrefix();
 
   public function getPrivateReplyHandlerEmailAddress(
-    PhabricatorObjectHandle $handle) {
+    PhabricatorUser $user) {
     return $this->getDefaultPrivateReplyHandlerEmailAddress(
-      $handle,
+      $user,
       $this->getObjectPrefix());
   }
 
@@ -39,7 +39,7 @@ abstract class PhabricatorApplicationTransactionReplyHandler
     return $editor;
   }
 
-  private function newTransaction() {
+  protected function newTransaction() {
     return $this->getMailReceiver()->getApplicationTransactionTemplate();
   }
 
@@ -56,6 +56,22 @@ abstract class PhabricatorApplicationTransactionReplyHandler
   final protected function receiveEmail(PhabricatorMetaMTAReceivedMail $mail) {
     $viewer = $this->getActor();
     $object = $this->getMailReceiver();
+    $app_email = $this->getApplicationEmail();
+
+    $is_new = !$object->getID();
+
+    // If this is a new object which implements the Spaces interface and was
+    // created by sending mail to an ApplicationEmail address, put the object
+    // in the same Space the address is in.
+    if ($is_new) {
+      if ($object instanceof PhabricatorSpacesInterface) {
+        if ($app_email) {
+          $space_phid = PhabricatorSpacesNamespaceQuery::getObjectSpacePHID(
+            $app_email);
+          $object->setSpacePHID($space_phid);
+        }
+      }
+    }
 
     $body_data = $mail->parseBody();
     $body = $body_data['body'];
@@ -64,15 +80,15 @@ abstract class PhabricatorApplicationTransactionReplyHandler
     $xactions = $this->didReceiveMail($mail, $body);
 
     // If this object is subscribable, subscribe all the users who were
-    // CC'd on the message.
+    // recipients on the message.
     if ($object instanceof PhabricatorSubscribableInterface) {
-      $subscriber_phids = $mail->loadCCPHIDs();
+      $subscriber_phids = $mail->loadAllRecipientPHIDs();
       if ($subscriber_phids) {
         $xactions[] = $this->newTransaction()
           ->setTransactionType(PhabricatorTransactions::TYPE_SUBSCRIBERS)
           ->setNewValue(
             array(
-              '+' => array($viewer->getPHID()),
+              '+' => $subscriber_phids,
             ));
       }
     }

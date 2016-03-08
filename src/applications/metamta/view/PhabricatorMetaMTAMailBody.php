@@ -6,7 +6,7 @@
  * @task compose  Composition
  * @task render   Rendering
  */
-final class PhabricatorMetaMTAMailBody {
+final class PhabricatorMetaMTAMailBody extends Phobject {
 
   private $sections = array();
   private $htmlSections = array();
@@ -20,6 +20,7 @@ final class PhabricatorMetaMTAMailBody {
 
   public function setViewer($viewer) {
     $this->viewer = $viewer;
+    return $this;
   }
 
 /* -(  Composition  )-------------------------------------------------------- */
@@ -42,16 +43,16 @@ final class PhabricatorMetaMTAMailBody {
     return $this;
   }
 
-  public function addRemarkupSection($text) {
+  public function addRemarkupSection($header, $text) {
     try {
       $engine = PhabricatorMarkupEngine::newMarkupEngine(array());
       $engine->setConfig('viewer', $this->getViewer());
       $engine->setMode(PhutilRemarkupEngine::MODE_TEXT);
       $styled_text = $engine->markupText($text);
-      $this->sections[] = $styled_text;
+      $this->addPlaintextSection($header, $styled_text);
     } catch (Exception $ex) {
       phlog($ex);
-      $this->sections[] = $text;
+      $this->addTextSection($header, $text);
     }
 
     try {
@@ -62,14 +63,10 @@ final class PhabricatorMetaMTAMailBody {
         'uri.base',
         PhabricatorEnv::getProductionURI('/'));
       $html = $mail_engine->markupText($text);
-      $this->htmlSections[] = $html;
+      $this->addHTMLSection($header, $html);
     } catch (Exception $ex) {
       phlog($ex);
-      $this->htmlSections[] = phutil_escape_html_newlines(
-        phutil_tag(
-          'div',
-          array(),
-          $text));
+      $this->addHTMLSection($header, $text);
     }
 
     return $this;
@@ -120,12 +117,16 @@ final class PhabricatorMetaMTAMailBody {
   }
 
   public function addHTMLSection($header, $html_fragment) {
+    if ($header !== null) {
+      $header = phutil_tag('strong', array(), $header);
+    }
+
     $this->htmlSections[] = array(
       phutil_tag(
         'div',
         array(),
         array(
-          phutil_tag('strong', array(), $header),
+          $header,
           phutil_tag('div', array(), $html_fragment),
         )),
     );
@@ -157,26 +158,6 @@ final class PhabricatorMetaMTAMailBody {
 
     return $this;
   }
-
-
-  /**
-   * Add a section with a link to email preferences.
-   *
-   * @return this
-   * @task compose
-   */
-  public function addEmailPreferenceSection() {
-    if (!PhabricatorEnv::getEnvConfig('metamta.email-preferences')) {
-      return $this;
-    }
-
-    $href = PhabricatorEnv::getProductionURI(
-      '/settings/panel/emailpreferences/');
-    $this->addLinkSection(pht('EMAIL PREFERENCES'), $href);
-
-    return $this;
-  }
-
 
   /**
    * Add an attachment.
@@ -231,5 +212,4 @@ final class PhabricatorMetaMTAMailBody {
   private function indent($text) {
     return rtrim("  ".str_replace("\n", "\n  ", $text));
   }
-
 }

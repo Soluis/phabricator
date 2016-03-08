@@ -1,8 +1,13 @@
 <?php
 
-final class ReleephBranchTemplate {
+final class ReleephBranchTemplate extends Phobject {
 
   const KEY = 'releeph.default-branch-template';
+
+  private $commitHandle;
+  private $branchDate = null;
+  private $projectName;
+  private $isSymbolic;
 
   public static function getDefaultTemplate() {
     return PhabricatorEnv::getEnvConfig(self::KEY);
@@ -20,25 +25,14 @@ final class ReleephBranchTemplate {
   }
 
   public static function getFakeCommitHandleFor(
-    $arc_project_id,
+    $repository_phid,
     PhabricatorUser $viewer) {
 
-    $arc_project = id(new PhabricatorRepositoryArcanistProject())
-      ->load($arc_project_id);
-    if (!$arc_project) {
-      throw new Exception(
-        pht(
-          "No Arc project found with id '%s'!",
-          $arc_project_id));
-    }
+    $repository = id(new PhabricatorRepositoryQuery())
+      ->setViewer($viewer)
+      ->withPHIDs(array($repository_phid))
+      ->executeOne();
 
-    $repository = null;
-    if ($arc_project->getRepositoryID()) {
-      $repository = id(new PhabricatorRepositoryQuery())
-        ->setViewer($viewer)
-        ->withIDs(array($arc_project->getRepositoryID()))
-        ->executeOne();
-    }
     $fake_handle = 'SOFAKE';
     if ($repository) {
       $fake_handle = id(new PhabricatorObjectHandle())
@@ -46,11 +40,6 @@ final class ReleephBranchTemplate {
     }
     return $fake_handle;
   }
-
-  private $commitHandle;
-  private $branchDate = null;
-  private $projectName;
-  private $isSymbolic;
 
   public function setCommitHandle(PhabricatorObjectHandle $handle) {
     $this->commitHandle = $handle;

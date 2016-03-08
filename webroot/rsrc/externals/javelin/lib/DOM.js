@@ -310,7 +310,13 @@ JX.$N = function(tag, attr, content) {
     }
   }
 
-  JX.copy(node, attr);
+  for (var k in attr) {
+    if (attr[k] === null) {
+      continue;
+    }
+    node[k] = attr[k];
+  }
+
   if (content) {
     JX.DOM.setContent(node, content);
   }
@@ -716,7 +722,7 @@ JX.install('DOM', {
         node.className += ' '+className;
       } else if (has && !add) {
         node.className = node.className.replace(
-          new RegExp('(^|\\s)' + className + '(?:\\s|$)', 'g'), ' ');
+          new RegExp('(^|\\s)' + className + '(?:\\s|$)', 'g'), ' ').trim();
       }
     },
 

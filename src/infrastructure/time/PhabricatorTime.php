@@ -1,6 +1,6 @@
 <?php
 
-final class PhabricatorTime {
+final class PhabricatorTime extends Phobject {
 
   private static $stack = array();
   private static $originalZone;
@@ -70,6 +70,12 @@ final class PhabricatorTime {
     $day = $today->format('d');
     $today = new DateTime("{$year}-{$month}-{$day}", $timezone);
     return $today;
+  }
+
+  public static function getDateTimeFromEpoch($epoch, PhabricatorUser $viewer) {
+    $datetime = new DateTime('@'.$epoch);
+    $datetime->setTimeZone($viewer->getTimeZone());
+    return $datetime;
   }
 
 }

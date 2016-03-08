@@ -29,10 +29,7 @@ $generator = new CeleritySpriteGenerator();
 $sheets = array(
   'menu' => $generator->buildMenuSheet(),
   'tokens' => $generator->buildTokenSheet(),
-  'gradient' => $generator->buildGradientSheet(),
-  'main-header' => $generator->buildMainHeaderSheet(),
   'login' => $generator->buildLoginSheet(),
-  'projects' => $generator->buildProjectsSheet(),
 );
 
 list($err) = exec_manual('optipng');

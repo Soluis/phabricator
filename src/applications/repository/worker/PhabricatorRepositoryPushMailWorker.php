@@ -27,6 +27,30 @@ final class PhabricatorRepositoryPushMailWorker
       return;
     }
 
+    $targets = id(new PhabricatorRepositoryPushReplyHandler())
+      ->setMailReceiver($repository)
+      ->getMailTargets($email_phids, array());
+
+    $messages = array();
+    foreach ($targets as $target) {
+      $messages[] = $this->sendMail($target, $repository, $event);
+    }
+
+    foreach ($messages as $message) {
+      $message->save();
+    }
+  }
+
+  private function sendMail(
+    PhabricatorMailTarget $target,
+    PhabricatorRepository $repository,
+    PhabricatorRepositoryPushEvent $event) {
+
+    $task_data = $this->getTaskData();
+    $viewer = $target->getViewer();
+
+    $locale = PhabricatorEnv::beginScopedLocale($viewer->getTranslation());
+
     $logs = $event->getLogs();
 
     list($ref_lines, $ref_list) = $this->renderRefs($logs);
@@ -103,25 +127,7 @@ final class PhabricatorRepositoryPushMailWorker
       ->addHeader('Thread-Topic', $subject)
       ->setIsBulk(true);
 
-    $to_handles = id(new PhabricatorHandleQuery())
-      ->setViewer($viewer)
-      ->withPHIDs($email_phids)
-      ->execute();
-
-    $reply_handler = new PhabricatorRepositoryPushReplyHandler();
-    $mails = $reply_handler->multiplexMail(
-      $mail,
-      $to_handles,
-      array());
-
-    foreach ($mails as $mail) {
-      $mail->saveAndSend();
-    }
-  }
-
-  public function renderForDisplay(PhabricatorUser $viewer) {
-    // This data has some sensitive stuff, so don't show it.
-    return null;
+    return $target->willSendMail($mail);
   }
 
   private function renderRefs(array $logs) {

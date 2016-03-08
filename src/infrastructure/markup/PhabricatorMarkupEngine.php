@@ -37,12 +37,14 @@
  * @task markup Markup Pipeline
  * @task engine Engine Construction
  */
-final class PhabricatorMarkupEngine {
+final class PhabricatorMarkupEngine extends Phobject {
 
   private $objects = array();
   private $viewer;
   private $contextObject;
   private $version = 15;
+  private $engineCaches = array();
+  private $auxiliaryConfig = array();
 
 
 /* -(  Markup Pipeline  )---------------------------------------------------- */
@@ -121,6 +123,10 @@ final class PhabricatorMarkupEngine {
       $engines[$key] = $info['object']->newMarkupEngine($info['field']);
       $engines[$key]->setConfig('viewer', $this->viewer);
       $engines[$key]->setConfig('contextObject', $this->contextObject);
+
+      foreach ($this->auxiliaryConfig as $aux_key => $aux_value) {
+        $engines[$key]->setConfig($aux_key, $aux_value);
+      }
     }
 
     // Load or build the preprocessor caches.
@@ -197,10 +203,7 @@ final class PhabricatorMarkupEngine {
     }
 
     if (!isset($this->objects[$key]['output'])) {
-      throw new Exception(
-        pht(
-          'Call %s before using results.',
-          'process()'));
+      throw new PhutilInvalidStateException('process');
     }
   }
 
@@ -309,6 +312,12 @@ final class PhabricatorMarkupEngine {
    */
   public function setContextObject($object) {
     $this->contextObject = $object;
+    return $this;
+  }
+
+  public function setAuxiliaryConfig($key, $value) {
+    // TODO: This is gross and should be removed. Avoid use.
+    $this->auxiliaryConfig[$key] = $value;
     return $this;
   }
 
@@ -483,6 +492,9 @@ final class PhabricatorMarkupEngine {
       $rules[] = new PhabricatorYoutubeRemarkupRule();
     }
 
+    $rules[] = new PhabricatorIconRemarkupRule();
+    $rules[] = new PhabricatorEmojiRemarkupRule();
+
     $applications = PhabricatorApplication::getAllInstalledApplications();
     foreach ($applications as $application) {
       foreach ($application->getRemarkupRules() as $rule) {
@@ -501,6 +513,7 @@ final class PhabricatorMarkupEngine {
     $rules[] = new PhutilRemarkupItalicRule();
     $rules[] = new PhutilRemarkupDelRule();
     $rules[] = new PhutilRemarkupUnderlineRule();
+    $rules[] = new PhutilRemarkupHighlightRule();
 
     foreach (self::loadCustomInlineRules() as $rule) {
       $rules[] = $rule;
@@ -624,15 +637,15 @@ final class PhabricatorMarkupEngine {
   }
 
   private static function loadCustomInlineRules() {
-    return id(new PhutilSymbolLoader())
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorRemarkupCustomInlineRule')
-      ->loadObjects();
+      ->execute();
   }
 
   private static function loadCustomBlockRules() {
-    return id(new PhutilSymbolLoader())
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorRemarkupCustomBlockRule')
-      ->loadObjects();
+      ->execute();
   }
 
 }

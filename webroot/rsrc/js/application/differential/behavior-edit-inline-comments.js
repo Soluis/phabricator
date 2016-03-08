@@ -22,6 +22,26 @@ JX.behavior('differential-edit-inline-comments', function(config) {
 
   var editor = null;
 
+  function updateReticleForComment(e) {
+    root = e.getNode('differential-changeset');
+    if (!root) {
+      return;
+    }
+
+    var data = e.getNodeData('differential-inline-comment');
+    var change = e.getNodeData('differential-changeset');
+
+    var id_part = data.on_right ? change.right : change.left;
+    var new_part = data.isNewFile ? 'N' : 'O';
+    var prefix = 'C' + id_part + new_part + 'L';
+
+    origin = JX.$(prefix + data.number);
+    target = JX.$(prefix + (parseInt(data.number, 10) +
+                            parseInt(data.length, 10)));
+
+    updateReticle();
+  }
+
   function updateReticle() {
     JX.DOM.getContentFrame().appendChild(reticle);
 
@@ -138,10 +158,20 @@ JX.behavior('differential-edit-inline-comments', function(config) {
     'mousedown',
     ['differential-changeset', 'tag:th'],
     function(e) {
-      if (editor  ||
-          selecting ||
-          e.isRightButton() ||
+      if (e.isRightButton() ||
           getRowNumber(e.getTarget()) === undefined) {
+        return;
+      }
+
+      if (editor) {
+        new JX.DifferentialInlineCommentEditor(config.uri)
+          .setOperation('busy')
+          .setRow(editor.getRow().previousSibling)
+          .start();
+        return;
+      }
+
+      if (selecting) {
         return;
       }
 
@@ -166,6 +196,10 @@ JX.behavior('differential-edit-inline-comments', function(config) {
     ['mouseover', 'mouseout'],
     ['differential-changeset', 'tag:th'],
     function(e) {
+      if (e.getIsTouchEvent()) {
+        return;
+      }
+
       if (editor) {
         // Don't update the reticle if we're editing a comment, since this
         // would be distracting and we want to keep the lines corresponding
@@ -264,24 +298,14 @@ JX.behavior('differential-edit-inline-comments', function(config) {
     ['mouseover', 'mouseout'],
     'differential-inline-comment',
     function(e) {
+      if (e.getIsTouchEvent()) {
+        return;
+      }
+
       if (e.getType() == 'mouseout') {
         hideReticle();
       } else {
-        root = e.getNode('differential-changeset');
-        if (root) {
-          var data = e.getNodeData('differential-inline-comment');
-          var change = e.getNodeData('differential-changeset');
-
-          var id_part = data.on_right ? change.right : change.left;
-          var new_part = data.isNewFile ? 'N' : 'O';
-          var prefix = 'C' + id_part + new_part + 'L';
-
-          origin = JX.$(prefix + data.number);
-          target = JX.$(prefix + (parseInt(data.number, 10) +
-                                  parseInt(data.length, 10)));
-
-          updateReticle();
-        }
+        updateReticleForComment(e);
       }
     });
 
@@ -293,6 +317,12 @@ JX.behavior('differential-edit-inline-comments', function(config) {
     }
 
     var node = e.getNode('differential-inline-comment');
+
+    // If we're on a touch device, we didn't highlight the affected lines
+    // earlier because we can't use hover events to mutate the document.
+    // Highlight them now.
+    updateReticleForComment(e);
+
     handle_inline_action(node, op);
   };
 
@@ -394,5 +424,88 @@ JX.behavior('differential-edit-inline-comments', function(config) {
       var data = e.getData();
       handle_inline_action(data.node, data.op);
     });
+
+  // Respond to the user clicking the "Hide Inline" button on an inline
+  // comment.
+  JX.Stratcom.listen('click', 'hide-inline', function(e) {
+    e.kill();
+
+    var row = e.getNode('inline-row');
+    JX.DOM.hide(row);
+
+    var prev = row.previousSibling;
+    while (prev && JX.Stratcom.hasSigil(prev, 'inline-row')) {
+      prev = prev.previousSibling;
+    }
+
+    if (!prev) {
+      return;
+    }
+
+    var comment = e.getNodeData('differential-inline-comment');
+
+    var slots = [];
+    for (var ii = 0; ii < prev.childNodes.length; ii++) {
+      if (JX.DOM.isType(prev.childNodes[ii], 'th')) {
+        slots.push(prev.childNodes[ii]);
+      }
+    }
+
+    // Select the right-hand side if the comment is on the right.
+    var slot = (comment.on_right && slots[1]) || slots[0];
+
+    var reveal = JX.DOM.scry(slot, 'a', 'reveal-inlines')[0];
+    if (!reveal) {
+      reveal = JX.$N(
+        'a',
+        {
+          className: 'reveal-inlines',
+          sigil: 'reveal-inlines'
+        },
+        JX.$H(config.revealIcon));
+
+      JX.DOM.prependContent(slot, reveal);
+    }
+
+    new JX.Workflow(config.uri, {op: 'hide', ids: comment.id})
+      .setHandler(JX.bag)
+      .start();
+  });
+
+  JX.Stratcom.listen('click', 'reveal-inlines', function(e) {
+    e.kill();
+
+    var row = e.getNode('tag:tr');
+    var next = row.nextSibling;
+
+    var ids = [];
+    var ii;
+
+    // Show any hidden inline comment rows directly below this one.
+    while (next && JX.Stratcom.hasSigil(next, 'inline-row')) {
+      JX.DOM.show(next);
+
+      var comments = JX.DOM.scry(next, 'div', 'differential-inline-comment');
+      for (ii = 0; ii < comments.length; ii++) {
+        var id = JX.Stratcom.getData(comments[ii]).id;
+        if (id) {
+          ids.push(id);
+        }
+      }
+
+      next = next.nextSibling;
+    }
+
+    // Remove any "reveal" icons on the row.
+    var reveals = JX.DOM.scry(row, 'a', 'reveal-inlines');
+    for (ii = 0; ii < reveals.length; ii++) {
+      JX.DOM.remove(reveals[ii]);
+    }
+
+    new JX.Workflow(config.uri, {op: 'show', ids: ids.join(',')})
+      .setHandler(JX.bag)
+      .start();
+  });
+
 
 });

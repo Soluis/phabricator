@@ -1,5 +1,8 @@
 <?php
 
+/**
+ * @task action Handling Action Requests
+ */
 abstract class NuanceSourceDefinition extends Phobject {
 
   private $actor;
@@ -9,9 +12,11 @@ abstract class NuanceSourceDefinition extends Phobject {
     $this->actor = $actor;
     return $this;
   }
+
   public function getActor() {
     return $this->actor;
   }
+
   public function requireActor() {
     $actor = $this->getActor();
     if (!$actor) {
@@ -25,9 +30,11 @@ abstract class NuanceSourceDefinition extends Phobject {
     $this->sourceObject = $source;
     return $this;
   }
+
   public function getSourceObject() {
     return $this->sourceObject;
   }
+
   public function requireSourceObject() {
     $source = $this->getSourceObject();
     if (!$source) {
@@ -36,62 +43,27 @@ abstract class NuanceSourceDefinition extends Phobject {
     return $source;
   }
 
-  public static function getSelectOptions() {
-    $definitions = self::getAllDefinitions();
-
-    $options = array();
-    foreach ($definitions as $definition) {
-      $key = $definition->getSourceTypeConstant();
-      $name = $definition->getName();
-      $options[$key] = $name;
-    }
-
-    return $options;
-  }
-
-  /**
-   * Gives a @{class:NuanceSourceDefinition} object for a given
-   * @{class:NuanceSource}. Note you still need to @{method:setActor}
-   * before the @{class:NuanceSourceDefinition} object will be useful.
-   */
-  public static function getDefinitionForSource(NuanceSource $source) {
-    $definitions = self::getAllDefinitions();
-    $map = mpull($definitions, null, 'getSourceTypeConstant');
-    $definition = $map[$source->getType()];
-    $definition->setSourceObject($source);
-
-    return $definition;
+  public function getSourceViewActions(AphrontRequest $request) {
+    return array();
   }
 
   public static function getAllDefinitions() {
-    static $definitions;
-
-    if ($definitions === null) {
-      $objects = id(new PhutilSymbolLoader())
-        ->setAncestorClass(__CLASS__)
-        ->loadObjects();
-      foreach ($objects as $definition) {
-        $key = $definition->getSourceTypeConstant();
-        $name = $definition->getName();
-        if (isset($definitions[$key])) {
-          $conflict = $definitions[$key];
-          throw new Exception(
-            pht(
-              'Definition %s conflicts with definition %s. This is a '.
-              'programming error.',
-              $conflict,
-              $name));
-        }
-      }
-      $definitions = $objects;
-    }
-    return $definitions;
+    return id(new PhutilClassMapQuery())
+      ->setAncestorClass(__CLASS__)
+      ->setUniqueMethod('getSourceTypeConstant')
+      ->execute();
   }
 
   /**
    * A human readable string like "Twitter" or "Phabricator Form".
    */
   abstract public function getName();
+
+
+  /**
+   * Human readable description of this source, a sentence or two long.
+   */
+  abstract public function getSourceDescription();
 
   /**
    * This should be a any VARCHAR(32).
@@ -193,35 +165,43 @@ abstract class NuanceSourceDefinition extends Phobject {
         ->setLabel(pht('Name'))
         ->setName('name')
         ->setError($e_name)
-        ->setValue($source->getName()))
-      ->appendChild(
-        id(new AphrontFormSelectControl())
-        ->setLabel(pht('Type'))
-        ->setName('type')
-        ->setOptions(self::getSelectOptions())
-        ->setValue($source->getType()));
+        ->setValue($source->getName()));
 
     $form = $this->augmentEditForm($form, $ex);
 
+    $default_phid = $source->getDefaultQueuePHID();
+    if ($default_phid) {
+      $default_queues = array($default_phid);
+    } else {
+      $default_queues = array();
+    }
+
     $form
+      ->appendControl(
+        id(new AphrontFormTokenizerControl())
+          ->setLabel(pht('Default Queue'))
+          ->setName('defaultQueuePHIDs')
+          ->setLimit(1)
+          ->setDatasource(new NuanceQueueDatasource())
+          ->setValue($default_queues))
       ->appendChild(
         id(new AphrontFormPolicyControl())
-        ->setUser($user)
-        ->setCapability(PhabricatorPolicyCapability::CAN_VIEW)
-        ->setPolicyObject($source)
-        ->setPolicies($policies)
-        ->setName('viewPolicy'))
+          ->setUser($user)
+          ->setCapability(PhabricatorPolicyCapability::CAN_VIEW)
+          ->setPolicyObject($source)
+          ->setPolicies($policies)
+          ->setName('viewPolicy'))
       ->appendChild(
         id(new AphrontFormPolicyControl())
-        ->setUser($user)
-        ->setCapability(PhabricatorPolicyCapability::CAN_EDIT)
-        ->setPolicyObject($source)
-        ->setPolicies($policies)
-        ->setName('editPolicy'))
+          ->setUser($user)
+          ->setCapability(PhabricatorPolicyCapability::CAN_EDIT)
+          ->setPolicyObject($source)
+          ->setPolicies($policies)
+          ->setName('editPolicy'))
       ->appendChild(
         id(new AphrontFormSubmitControl())
-        ->addCancelButton($source->getURI())
-        ->setValue(pht('Save')));
+          ->addCancelButton($source->getURI())
+          ->setValue(pht('Save')));
 
     return $form;
   }
@@ -247,12 +227,18 @@ abstract class NuanceSourceDefinition extends Phobject {
     $transactions[] = id(new NuanceSourceTransaction())
       ->setTransactionType(PhabricatorTransactions::TYPE_EDIT_POLICY)
       ->setNewValue($request->getStr('editPolicy'));
+
     $transactions[] = id(new NuanceSourceTransaction())
       ->setTransactionType(PhabricatorTransactions::TYPE_VIEW_POLICY)
       ->setNewValue($request->getStr('viewPolicy'));
-   $transactions[] = id(new NuanceSourceTransaction())
+
+    $transactions[] = id(new NuanceSourceTransaction())
       ->setTransactionType(NuanceSourceTransaction::TYPE_NAME)
       ->setNewvalue($request->getStr('name'));
+
+    $transactions[] = id(new NuanceSourceTransaction())
+      ->setTransactionType(NuanceSourceTransaction::TYPE_DEFAULT_QUEUE)
+      ->setNewvalue(head($request->getArr('defaultQueuePHIDs')));
 
     return $transactions;
   }
@@ -260,4 +246,79 @@ abstract class NuanceSourceDefinition extends Phobject {
   abstract public function renderView();
 
   abstract public function renderListView();
+
+
+  protected function newItemFromProperties(
+    NuanceRequestor $requestor,
+    array $properties,
+    PhabricatorContentSource $content_source) {
+
+    // TODO: Should we have a tighter actor/viewer model? Requestors will
+    // often have no real user associated with them...
+    $actor = PhabricatorUser::getOmnipotentUser();
+
+    $source = $this->requireSourceObject();
+
+    $item = NuanceItem::initializeNewItem();
+
+    $xactions = array();
+
+    $xactions[] = id(new NuanceItemTransaction())
+      ->setTransactionType(NuanceItemTransaction::TYPE_SOURCE)
+      ->setNewValue($source->getPHID());
+
+    $xactions[] = id(new NuanceItemTransaction())
+      ->setTransactionType(NuanceItemTransaction::TYPE_REQUESTOR)
+      ->setNewValue($requestor->getPHID());
+
+    // TODO: Eventually, apply real routing rules. For now, just put everything
+    // in the default queue for the source.
+    $xactions[] = id(new NuanceItemTransaction())
+      ->setTransactionType(NuanceItemTransaction::TYPE_QUEUE)
+      ->setNewValue($source->getDefaultQueuePHID());
+
+    foreach ($properties as $key => $property) {
+      $xactions[] = id(new NuanceItemTransaction())
+        ->setTransactionType(NuanceItemTransaction::TYPE_PROPERTY)
+        ->setMetadataValue(NuanceItemTransaction::PROPERTY_KEY, $key)
+        ->setNewValue($property);
+    }
+
+    $editor = id(new NuanceItemEditor())
+      ->setActor($actor)
+      ->setActingAsPHID($requestor->getActingAsPHID())
+      ->setContentSource($content_source);
+
+    $editor->applyTransactions($item, $xactions);
+
+    return $item;
+  }
+
+  public function renderItemViewProperties(
+    PhabricatorUser $viewer,
+    NuanceItem $item,
+    PHUIPropertyListView $view) {
+    return;
+  }
+
+  public function renderItemEditProperties(
+    PhabricatorUser $viewer,
+    NuanceItem $item,
+    PHUIPropertyListView $view) {
+    return;
+  }
+
+
+/* -(  Handling Action Requests  )------------------------------------------- */
+
+
+  public function handleActionRequest(AphrontRequest $request) {
+    return new Aphront404Response();
+  }
+
+  public function getActionURI($path = null) {
+    $source_id = $this->getSourceObject()->getID();
+    return '/action/'.$source_id.'/'.ltrim($path, '/');
+  }
+
 }

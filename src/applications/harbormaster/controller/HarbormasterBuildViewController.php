@@ -3,17 +3,11 @@
 final class HarbormasterBuildViewController
   extends HarbormasterController {
 
-  private $id;
-
-  public function willProcessRequest(array $data) {
-    $this->id = $data['id'];
-  }
-
-  public function processRequest() {
+  public function handleRequest(AphrontRequest $request) {
     $request = $this->getRequest();
     $viewer = $request->getUser();
 
-    $id = $this->id;
+    $id = $request->getURIData('id');
     $generation = $request->getInt('g');
 
     $build = id(new HarbormasterBuildQuery())
@@ -35,10 +29,12 @@ final class HarbormasterBuildViewController
 
     if ($build->isRestarting()) {
       $header->setStatus('fa-exclamation-triangle', 'red', pht('Restarting'));
-    } else if ($build->isStopping()) {
+    } else if ($build->isPausing()) {
       $header->setStatus('fa-exclamation-triangle', 'red', pht('Pausing'));
     } else if ($build->isResuming()) {
       $header->setStatus('fa-exclamation-triangle', 'red', pht('Resuming'));
+    } else if ($build->isAborting()) {
+      $header->setStatus('fa-exclamation-triangle', 'red', pht('Aborting'));
     }
 
     $box = id(new PHUIObjectBoxView())
@@ -48,9 +44,7 @@ final class HarbormasterBuildViewController
     $this->buildPropertyLists($box, $build, $actions);
 
     $crumbs = $this->buildApplicationCrumbs();
-    $crumbs->addTextCrumb(
-      $build->getBuildable()->getMonogram(),
-      '/'.$build->getBuildable()->getMonogram());
+    $this->addBuildableCrumb($crumbs, $build->getBuildable());
     $crumbs->addTextCrumb($title);
 
     if ($generation === null || $generation > $build->getBuildGeneration() ||
@@ -75,6 +69,18 @@ final class HarbormasterBuildViewController
       $messages = array();
     }
 
+    if ($build_targets) {
+      $artifacts = id(new HarbormasterBuildArtifactQuery())
+        ->setViewer($viewer)
+        ->withBuildTargetPHIDs(mpull($build_targets, 'getPHID'))
+        ->execute();
+      $artifacts = msort($artifacts, 'getArtifactKey');
+      $artifacts = mgroup($artifacts, 'getBuildTargetPHID');
+    } else {
+      $artifacts = array();
+    }
+
+
     $targets = array();
     foreach ($build_targets as $build_target) {
       $header = id(new PHUIHeaderView())
@@ -85,6 +91,27 @@ final class HarbormasterBuildViewController
         ->setHeader($header);
 
       $properties = new PHUIPropertyListView();
+
+      $target_artifacts = idx($artifacts, $build_target->getPHID(), array());
+
+      $links = array();
+      $type_uri = HarbormasterURIArtifact::ARTIFACTCONST;
+      foreach ($target_artifacts as $artifact) {
+        if ($artifact->getArtifactType() == $type_uri) {
+          $impl = $artifact->getArtifactImplementation();
+          if ($impl->isExternalLink()) {
+            $links[] = $impl->renderLink();
+          }
+        }
+      }
+
+      if ($links) {
+        $links = phutil_implode_html(phutil_tag('br'), $links);
+        $properties->addProperty(
+          pht('External Link'),
+          $links);
+      }
+
       $status_view = new PHUIStatusListView();
 
       $item = new PHUIStatusItemView();
@@ -99,28 +126,51 @@ final class HarbormasterBuildViewController
       $item->setIcon($icon, $color);
       $status_view->addItem($item);
 
-      $properties->addProperty(pht('Name'), $build_target->getName());
+      $when = array();
+      $started = $build_target->getDateStarted();
+      $now = PhabricatorTime::getNow();
+      if ($started) {
+        $ended = $build_target->getDateCompleted();
+        if ($ended) {
+          $when[] = pht(
+            'Completed at %s',
+            phabricator_datetime($started, $viewer));
 
-      if ($build_target->getDateStarted() !== null) {
-        $properties->addProperty(
-          pht('Started'),
-          phabricator_datetime($build_target->getDateStarted(), $viewer));
-        if ($build_target->isComplete()) {
-          $properties->addProperty(
-            pht('Completed'),
-            phabricator_datetime($build_target->getDateCompleted(), $viewer));
-          $properties->addProperty(
-            pht('Duration'),
-            phutil_format_relative_time_detailed(
-              $build_target->getDateCompleted() -
-              $build_target->getDateStarted()));
+          $duration = ($ended - $started);
+          if ($duration) {
+            $when[] = pht(
+              'Built for %s',
+              phutil_format_relative_time_detailed($duration));
+          } else {
+            $when[] = pht('Built instantly');
+          }
         } else {
-          $properties->addProperty(
-            pht('Elapsed'),
-            phutil_format_relative_time_detailed(
-              time() - $build_target->getDateStarted()));
+          $when[] = pht(
+            'Started at %s',
+            phabricator_datetime($started, $viewer));
+          $duration = ($now - $started);
+          if ($duration) {
+            $when[] = pht(
+              'Running for %s',
+              phutil_format_relative_time_detailed($duration));
+          }
+        }
+      } else {
+        $created = $build_target->getDateCreated();
+        $when[] = pht(
+          'Queued at %s',
+          phabricator_datetime($started, $viewer));
+        $duration = ($now - $created);
+        if ($duration) {
+          $when[] = pht(
+            'Waiting for %s',
+            phutil_format_relative_time_detailed($duration));
         }
       }
+
+      $properties->addProperty(
+        pht('When'),
+        phutil_implode_html(" \xC2\xB7 ", $when));
 
       $properties->addProperty(pht('Status'), $status_view);
 
@@ -131,15 +181,10 @@ final class HarbormasterBuildViewController
       if ($step) {
         $description = $step->getDescription();
         if ($description) {
-          $rendered = PhabricatorMarkupEngine::renderOneObject(
-            id(new PhabricatorMarkupOneOff())
-              ->setContent($description)
-              ->setPreserveLinebreaks(true),
-            'default',
-            $viewer);
-
-          $properties->addSectionHeader(pht('Description'));
-          $properties->addTextContent($rendered);
+          $description = new PHUIRemarkupView($viewer, $description);
+          $properties->addSectionHeader(
+            pht('Description'), PHUIPropertyListView::ICON_SUMMARY);
+          $properties->addTextContent($description);
         }
       } else {
         $target_box->setFormErrors(
@@ -151,39 +196,34 @@ final class HarbormasterBuildViewController
       }
 
       $details = $build_target->getDetails();
-      if ($details) {
-        $properties = new PHUIPropertyListView();
-        foreach ($details as $key => $value) {
-          $properties->addProperty($key, $value);
-        }
-        $target_box->addPropertyList($properties, pht('Configuration'));
+      $properties = new PHUIPropertyListView();
+      foreach ($details as $key => $value) {
+        $properties->addProperty($key, $value);
       }
+      $target_box->addPropertyList($properties, pht('Configuration'));
 
       $variables = $build_target->getVariables();
-      if ($variables) {
-        $properties = new PHUIPropertyListView();
-        foreach ($variables as $key => $value) {
-          $properties->addProperty($key, $value);
-        }
-        $target_box->addPropertyList($properties, pht('Variables'));
-      }
+      $properties = new PHUIPropertyListView();
+      $properties->addRawContent($this->buildProperties($variables));
+      $target_box->addPropertyList($properties, pht('Variables'));
 
-      $artifacts = $this->buildArtifacts($build_target);
-      if ($artifacts) {
-        $properties = new PHUIPropertyListView();
-        $properties->addRawContent($artifacts);
-        $target_box->addPropertyList($properties, pht('Artifacts'));
-      }
+      $artifacts_tab = $this->buildArtifacts($build_target, $target_artifacts);
+      $properties = new PHUIPropertyListView();
+      $properties->addRawContent($artifacts_tab);
+      $target_box->addPropertyList($properties, pht('Artifacts'));
 
       $build_messages = idx($messages, $build_target->getPHID(), array());
-      if ($build_messages) {
-        $properties = new PHUIPropertyListView();
-        $properties->addRawContent($this->buildMessages($build_messages));
-        $target_box->addPropertyList($properties, pht('Messages'));
-      }
+      $properties = new PHUIPropertyListView();
+      $properties->addRawContent($this->buildMessages($build_messages));
+      $target_box->addPropertyList($properties, pht('Messages'));
 
       $properties = new PHUIPropertyListView();
-      $properties->addProperty(pht('Build Target ID'), $build_target->getID());
+      $properties->addProperty(
+        pht('Build Target ID'),
+        $build_target->getID());
+      $properties->addProperty(
+        pht('Build Target PHID'),
+        $build_target->getPHID());
       $target_box->addPropertyList($properties, pht('Metadata'));
 
       $targets[] = $target_box;
@@ -209,31 +249,45 @@ final class HarbormasterBuildViewController
   }
 
   private function buildArtifacts(
-    HarbormasterBuildTarget $build_target) {
+    HarbormasterBuildTarget $build_target,
+    array $artifacts) {
+    $viewer = $this->getViewer();
 
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
-
-    $artifacts = id(new HarbormasterBuildArtifactQuery())
-      ->setViewer($viewer)
-      ->withBuildTargetPHIDs(array($build_target->getPHID()))
-      ->execute();
-
-    if (count($artifacts) === 0) {
-      return null;
-    }
-
-    $list = id(new PHUIObjectItemListView())
-      ->setFlush(true);
-
+    $rows = array();
     foreach ($artifacts as $artifact) {
-      $item = $artifact->getObjectItemView($viewer);
-      if ($item !== null) {
-        $list->addItem($item);
+      $impl = $artifact->getArtifactImplementation();
+
+      if ($impl) {
+        $summary = $impl->renderArtifactSummary($viewer);
+        $type_name = $impl->getArtifactTypeName();
+      } else {
+        $summary = pht('<Unknown Artifact Type>');
+        $type_name = $artifact->getType();
       }
+
+      $rows[] = array(
+        $artifact->getArtifactKey(),
+        $type_name,
+        $summary,
+      );
     }
 
-    return $list;
+    $table = id(new AphrontTableView($rows))
+      ->setNoDataString(pht('This target has no associated artifacts.'))
+      ->setHeaders(
+        array(
+          pht('Key'),
+          pht('Type'),
+          pht('Summary'),
+        ))
+      ->setColumnClasses(
+        array(
+          'pri',
+          '',
+          'wide',
+        ));
+
+    return $table;
   }
 
   private function buildLog(
@@ -317,7 +371,7 @@ final class HarbormasterBuildViewController
         array(
           pht(
             '%s empty logs are hidden.',
-            new PhutilNumber(count($empty_logs))),
+            phutil_count($empty_logs)),
           ' ',
           javelin_tag(
             'a',
@@ -385,12 +439,31 @@ final class HarbormasterBuildViewController
 
     $list = id(new PhabricatorActionListView())
       ->setUser($viewer)
-      ->setObject($build)
-      ->setObjectURI("/build/{$id}");
+      ->setObject($build);
 
-    $can_restart = $build->canRestartBuild();
-    $can_stop = $build->canStopBuild();
-    $can_resume = $build->canResumeBuild();
+    $can_restart =
+      $build->canRestartBuild() &&
+      $build->canIssueCommand(
+        $viewer,
+        HarbormasterBuildCommand::COMMAND_RESTART);
+
+    $can_pause =
+      $build->canPauseBuild() &&
+      $build->canIssueCommand(
+        $viewer,
+        HarbormasterBuildCommand::COMMAND_PAUSE);
+
+    $can_resume =
+      $build->canResumeBuild() &&
+      $build->canIssueCommand(
+        $viewer,
+        HarbormasterBuildCommand::COMMAND_RESUME);
+
+    $can_abort =
+      $build->canAbortBuild() &&
+      $build->canIssueCommand(
+        $viewer,
+        HarbormasterBuildCommand::COMMAND_ABORT);
 
     $list->addAction(
       id(new PhabricatorActionView())
@@ -413,10 +486,18 @@ final class HarbormasterBuildViewController
         id(new PhabricatorActionView())
           ->setName(pht('Pause Build'))
           ->setIcon('fa-pause')
-          ->setHref($this->getApplicationURI('/build/stop/'.$id.'/'))
-          ->setDisabled(!$can_stop)
+          ->setHref($this->getApplicationURI('/build/pause/'.$id.'/'))
+          ->setDisabled(!$can_pause)
           ->setWorkflow(true));
     }
+
+    $list->addAction(
+      id(new PhabricatorActionView())
+        ->setName(pht('Abort Build'))
+        ->setIcon('fa-exclamation-triangle')
+        ->setHref($this->getApplicationURI('/build/abort/'.$id.'/'))
+        ->setDisabled(!$can_abort)
+        ->setWorkflow(true));
 
     return $list;
   }
@@ -464,7 +545,7 @@ final class HarbormasterBuildViewController
 
     $item = new PHUIStatusItemView();
 
-    if ($build->isStopping()) {
+    if ($build->isPausing()) {
       $status_name = pht('Pausing');
       $icon = PHUIStatusItemView::ICON_RIGHT;
       $color = 'dark';
@@ -524,6 +605,32 @@ final class HarbormasterBuildViewController
         '',
         'date',
       ));
+
+    return $table;
+  }
+
+  private function buildProperties(array $properties) {
+    ksort($properties);
+
+    $rows = array();
+    foreach ($properties as $key => $value) {
+      $rows[] = array(
+        $key,
+        $value,
+      );
+    }
+
+    $table = id(new AphrontTableView($rows))
+      ->setHeaders(
+        array(
+          pht('Key'),
+          pht('Value'),
+        ))
+      ->setColumnClasses(
+        array(
+          'pri right',
+          'wide',
+        ));
 
     return $table;
   }

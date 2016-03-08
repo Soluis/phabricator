@@ -13,6 +13,7 @@ final class PHUIInfoView extends AphrontView {
   private $severity;
   private $id;
   private $buttons = array();
+  private $isHidden;
 
   public function setTitle($title) {
     $this->title = $title;
@@ -34,8 +35,12 @@ final class PHUIInfoView extends AphrontView {
     return $this;
   }
 
-  public function addButton(PHUIButtonView $button) {
+  public function setIsHidden($bool) {
+    $this->isHidden = $bool;
+    return $this;
+  }
 
+  public function addButton(PHUIButtonView $button) {
     $this->buttons[] = $button;
     return $this;
   }
@@ -44,7 +49,7 @@ final class PHUIInfoView extends AphrontView {
     require_celerity_resource('phui-info-view-css');
 
     $errors = $this->errors;
-    if ($errors) {
+    if (count($errors) > 1) {
       $list = array();
       foreach ($errors as $error) {
         $list[] = phutil_tag(
@@ -58,6 +63,8 @@ final class PHUIInfoView extends AphrontView {
           'class' => 'phui-info-view-list',
         ),
         $list);
+    } else if (count($errors) == 1) {
+      $list = $this->errors[0];
     } else {
       $list = null;
     }
@@ -112,6 +119,7 @@ final class PHUIInfoView extends AphrontView {
       array(
         'id' => $this->id,
         'class' => $classes,
+        'style' => $this->isHidden ? 'display: none;' : null,
       ),
       array(
         $buttons,

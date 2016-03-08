@@ -65,6 +65,8 @@ final class PhabricatorTriggerDaemon
     $this->nextCollection = PhabricatorTime::getNow();
 
     do {
+      PhabricatorCaches::destroyRequestCache();
+
       $lock = PhabricatorGlobalLock::newLock('trigger');
 
       try {
@@ -346,13 +348,15 @@ final class PhabricatorTriggerDaemon
     $next = $this->nextCollection;
     if ($next && (PhabricatorTime::getNow() >= $next)) {
       $this->nextCollection = null;
-      $this->garbageCollectors = $this->loadGarbageCollectors();
+
+      $all_collectors = PhabricatorGarbageCollector::getAllCollectors();
+      $this->garbageCollectors = $all_collectors;
     }
 
     // If we're in a collection cycle, continue collection.
     if ($this->garbageCollectors) {
       foreach ($this->garbageCollectors as $key => $collector) {
-        $more_garbage = $collector->collectGarbage();
+        $more_garbage = $collector->runCollector();
         if (!$more_garbage) {
           unset($this->garbageCollectors[$key]);
         }
@@ -374,19 +378,5 @@ final class PhabricatorTriggerDaemon
 
     return false;
   }
-
-
-  /**
-   * Load all of the available garbage collectors.
-   *
-   * @return list<PhabricatorGarbageCollector> Garbage collectors.
-   * @task garbage
-   */
-  private function loadGarbageCollectors() {
-    return id(new PhutilSymbolLoader())
-      ->setAncestorClass('PhabricatorGarbageCollector')
-      ->loadObjects();
-  }
-
 
 }

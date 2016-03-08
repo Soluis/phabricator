@@ -3,10 +3,8 @@
 final class PhabricatorXHPASTViewRunController
   extends PhabricatorXHPASTViewController {
 
-  public function processRequest() {
-
-    $request = $this->getRequest();
-    $user = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $this->getViewer();
 
     if ($request->isFormPost()) {
       $source = $request->getStr('source');
@@ -15,24 +13,28 @@ final class PhabricatorXHPASTViewRunController
       $resolved = $future->resolve();
 
       // This is just to let it throw exceptions if stuff is broken.
-      $parse_tree = XHPASTTree::newFromDataAndResolvedExecFuture(
-        $source,
-        $resolved);
+      try {
+        XHPASTTree::newFromDataAndResolvedExecFuture($source, $resolved);
+      } catch (XHPASTSyntaxErrorException $ex) {
+        // This is possibly expected.
+      }
 
       list($err, $stdout, $stderr) = $resolved;
 
-      $storage_tree = new PhabricatorXHPASTViewParseTree();
-      $storage_tree->setInput($source);
-      $storage_tree->setStdout($stdout);
-      $storage_tree->setAuthorPHID($user->getPHID());
-      $storage_tree->save();
+      $storage_tree = id(new PhabricatorXHPASTParseTree())
+        ->setInput($source)
+        ->setReturnCode($err)
+        ->setStdout($stdout)
+        ->setStderr($stderr)
+        ->setAuthorPHID($viewer->getPHID())
+        ->save();
 
       return id(new AphrontRedirectResponse())
         ->setURI('/xhpast/view/'.$storage_tree->getID().'/');
     }
 
     $form = id(new AphrontFormView())
-      ->setUser($user)
+      ->setUser($viewer)
       ->appendChild(
         id(new AphrontFormTextAreaControl())
           ->setLabel(pht('Source'))
@@ -41,7 +43,7 @@ final class PhabricatorXHPASTViewRunController
           ->setHeight(AphrontFormTextAreaControl::HEIGHT_VERY_TALL))
       ->appendChild(
         id(new AphrontFormSubmitControl())
-          ->setValue('Parse'));
+          ->setValue(pht('Parse')));
 
     $form_box = id(new PHUIObjectBoxView())
       ->setHeaderText(pht('Generate XHP AST'))

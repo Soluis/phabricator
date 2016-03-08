@@ -126,8 +126,7 @@ final class PhabricatorHomePreferencesSettingsPanel
 
     $list = id(new PHUIObjectItemListView())
       ->setUser($user)
-      ->setID($list_id)
-      ->setStackable(true);
+      ->setID($list_id);
 
     Javelin::initBehavior(
       'reorder-applications',
@@ -141,7 +140,7 @@ final class PhabricatorHomePreferencesSettingsPanel
         continue;
       }
 
-      $icon = $application->getFontIcon();
+      $icon = $application->getIcon();
       if (!$icon) {
         $icon = 'application';
       }
@@ -183,13 +182,11 @@ final class PhabricatorHomePreferencesSettingsPanel
           ->setText(pht('Pin Application'))
           ->setHref($this->getPanelURI().'?add=true')
           ->setWorkflow(true)
-          ->setIcon(
-            id(new PHUIIconView())
-              ->setIconFont('fa-thumb-tack')));
+          ->setIcon('fa-thumb-tack'));
 
     $box = id(new PHUIObjectBoxView())
       ->setHeader($header)
-      ->appendChild($list);
+      ->setObjectList($list);
 
     return $box;
   }

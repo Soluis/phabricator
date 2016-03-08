@@ -6,7 +6,7 @@ final class DiffusionRepositoryCreateController
   private $edit;
   private $repository;
 
-  protected function processDiffusionRequest(AphrontRequest $request) {
+  public function handleRequest(AphrontRequest $request) {
     $viewer = $request->getUser();
     $this->edit = $request->getURIData('edit');
 
@@ -19,6 +19,11 @@ final class DiffusionRepositoryCreateController
     switch ($this->edit) {
       case 'remote':
       case 'policy':
+        $response = $this->loadDiffusionContextForEdit();
+        if ($response) {
+          return $response;
+        }
+
         $repository = $this->getDiffusionRequest()->getRepository();
 
         // Make sure we have CAN_EDIT.
@@ -42,10 +47,11 @@ final class DiffusionRepositoryCreateController
         // allocations, we fail.
         $services = id(new AlmanacServiceQuery())
           ->setViewer(PhabricatorUser::getOmnipotentUser())
-          ->withServiceClasses(
+          ->withServiceTypes(
             array(
-              'AlmanacClusterRepositoryServiceType',
+              AlmanacClusterRepositoryServiceType::SERVICETYPE,
             ))
+          ->needProperties(true)
           ->execute();
         if ($services) {
           // Filter out services which do not permit new allocations.
@@ -129,7 +135,6 @@ final class DiffusionRepositoryCreateController
         $type_name = PhabricatorRepositoryTransaction::TYPE_NAME;
         $type_vcs = PhabricatorRepositoryTransaction::TYPE_VCS;
         $type_activate = PhabricatorRepositoryTransaction::TYPE_ACTIVATE;
-        $type_local_path = PhabricatorRepositoryTransaction::TYPE_LOCAL_PATH;
         $type_remote_uri = PhabricatorRepositoryTransaction::TYPE_REMOTE_URI;
         $type_hosting = PhabricatorRepositoryTransaction::TYPE_HOSTING;
         $type_http = PhabricatorRepositoryTransaction::TYPE_PROTOCOL_HTTP;
@@ -137,6 +142,7 @@ final class DiffusionRepositoryCreateController
         $type_credential = PhabricatorRepositoryTransaction::TYPE_CREDENTIAL;
         $type_view = PhabricatorTransactions::TYPE_VIEW_POLICY;
         $type_edit = PhabricatorTransactions::TYPE_EDIT_POLICY;
+        $type_space = PhabricatorTransactions::TYPE_SPACE;
         $type_push = PhabricatorRepositoryTransaction::TYPE_PUSH_POLICY;
         $type_service = PhabricatorRepositoryTransaction::TYPE_SERVICE;
 
@@ -144,14 +150,6 @@ final class DiffusionRepositoryCreateController
 
         // If we're creating a new repository, set all this core stuff.
         if ($is_create) {
-          $callsign = $form->getPage('name')
-            ->getControl('callsign')->getValue();
-
-          // We must set this to a unique value to save the repository
-          // initially, and it's immutable, so we don't bother using
-          // transactions to apply this change.
-          $repository->setCallsign($callsign);
-
           $xactions[] = id(clone $template)
             ->setTransactionType($type_name)
             ->setNewValue(
@@ -173,16 +171,6 @@ final class DiffusionRepositoryCreateController
               ->setTransactionType($type_service)
               ->setNewValue($service->getPHID());
           }
-
-          $default_local_path = PhabricatorEnv::getEnvConfig(
-            'repository.default-local-path');
-
-          $default_local_path = rtrim($default_local_path, '/');
-          $default_local_path = $default_local_path.'/'.$callsign.'/';
-
-          $xactions[] = id(clone $template)
-            ->setTransactionType($type_local_path)
-            ->setNewValue($default_local_path);
         }
 
         if ($is_init) {
@@ -225,22 +213,26 @@ final class DiffusionRepositoryCreateController
         }
 
         if ($is_policy) {
+          $policy_page = $form->getPage('policy');
+
           $xactions[] = id(clone $template)
             ->setTransactionType($type_view)
-            ->setNewValue(
-              $form->getPage('policy')->getControl('viewPolicy')->getValue());
+            ->setNewValue($policy_page->getControl('viewPolicy')->getValue());
 
           $xactions[] = id(clone $template)
             ->setTransactionType($type_edit)
-            ->setNewValue(
-              $form->getPage('policy')->getControl('editPolicy')->getValue());
+            ->setNewValue($policy_page->getControl('editPolicy')->getValue());
 
           if ($is_init || $repository->isHosted()) {
             $xactions[] = id(clone $template)
               ->setTransactionType($type_push)
-              ->setNewValue(
-                $form->getPage('policy')->getControl('pushPolicy')->getValue());
+              ->setNewValue($policy_page->getControl('pushPolicy')->getValue());
           }
+
+          $xactions[] = id(clone $template)
+            ->setTransactionType($type_space)
+            ->setNewValue(
+              $policy_page->getControl('viewPolicy')->getSpacePHID());
         }
 
         id(new PhabricatorRepositoryEditor())
@@ -261,6 +253,7 @@ final class DiffusionRepositoryCreateController
           'viewPolicy' => $repository->getViewPolicy(),
           'editPolicy' => $repository->getEditPolicy(),
           'pushPolicy' => $repository->getPushPolicy(),
+          'spacePHID' => $repository->getSpacePHID(),
         );
       }
       $form->readFromObject($dict);
@@ -269,14 +262,10 @@ final class DiffusionRepositoryCreateController
     $crumbs = $this->buildApplicationCrumbs();
     $crumbs->addTextCrumb($title);
 
-    return $this->buildApplicationPage(
-      array(
-        $crumbs,
-        $form,
-      ),
-      array(
-        'title' => $title,
-      ));
+    return $this->newPage()
+      ->setTitle($title)
+      ->setCrumbs($crumbs)
+      ->appendChild($form);
   }
 
 
@@ -317,25 +306,6 @@ final class DiffusionRepositoryCreateController
         pht('Subversion'),
         $svn_str);
 
-    if ($is_import) {
-      $control->addButton(
-        PhabricatorRepositoryType::REPOSITORY_TYPE_PERFORCE,
-        pht('Perforce'),
-        pht(
-          'Perforce is not directly supported, but you can import '.
-          'a Perforce repository as a Git repository using %s.',
-          phutil_tag(
-            'a',
-            array(
-              'href' =>
-                'http://www.perforce.com/product/components/git-fusion',
-              'target' => '_blank',
-            ),
-            pht('Perforce Git Fusion'))),
-        'disabled',
-        $disabled = true);
-    }
-
     return id(new PHUIFormPageView())
       ->setPageName(pht('Repository Type'))
       ->setUser($this->getRequest()->getUser())
@@ -366,7 +336,7 @@ final class DiffusionRepositoryCreateController
   }
 
 
-/* -(  Page: Name and Callsign  )-------------------------------------------- */
+/* -(  Page: Name  )--------------------------------------------------------- */
 
 
   private function buildNamePage() {
@@ -382,23 +352,7 @@ final class DiffusionRepositoryCreateController
       ->addControl(
         id(new AphrontFormTextControl())
           ->setName('name')
-          ->setLabel(pht('Name'))
-          ->setCaption(pht('Human-readable repository name.')))
-      ->addRemarkupInstructions(
-        pht(
-          '**Choose a "Callsign" for the repository.** This is a short, '.
-          'unique string which identifies commits elsewhere in Phabricator. '.
-          'For example, you might use `M` for your mobile app repository '.
-          'and `B` for your backend repository.'.
-          "\n\n".
-          '**Callsigns must be UPPERCASE**, and can not be edited after the '.
-          'repository is created. Generally, you should choose short '.
-          'callsigns.'))
-      ->addControl(
-        id(new AphrontFormTextControl())
-          ->setName('callsign')
-          ->setLabel(pht('Callsign'))
-          ->setCaption(pht('Short UPPERCASE identifier.')));
+          ->setLabel(pht('Name')));
   }
 
   public function validateNamePage(PHUIFormPageView $page) {
@@ -410,38 +364,7 @@ final class DiffusionRepositoryCreateController
         pht('You must choose a name for this repository.'));
     }
 
-    $c_call = $page->getControl('callsign');
-    $v_call = $c_call->getValue();
-    if (!strlen($v_call)) {
-      $c_call->setError(pht('Required'));
-      $page->addPageError(
-        pht('You must choose a callsign for this repository.'));
-    } else if (!preg_match('/^[A-Z]+\z/', $v_call)) {
-      $c_call->setError(pht('Invalid'));
-      $page->addPageError(
-        pht('The callsign must contain only UPPERCASE letters.'));
-    } else {
-      $exists = false;
-      try {
-        $repo = id(new PhabricatorRepositoryQuery())
-          ->setViewer($this->getRequest()->getUser())
-          ->withCallsigns(array($v_call))
-          ->executeOne();
-        $exists = (bool)$repo;
-      } catch (PhabricatorPolicyException $ex) {
-        $exists = true;
-      }
-      if ($exists) {
-        $c_call->setError(pht('Not Unique'));
-        $page->addPageError(
-          pht(
-            'Another repository already uses that callsign. You must choose '.
-            'a unique callsign.'));
-      }
-    }
-
-    return $c_name->isValid() &&
-           $c_call->isValid();
+    return $c_name->isValid();
   }
 
 
@@ -591,12 +514,12 @@ final class DiffusionRepositoryCreateController
     if ($this->isSSHProtocol($proto)) {
       $c_credential->setLabel(pht('SSH Key'));
       $c_credential->setCredentialType(
-        PassphraseCredentialTypeSSHPrivateKeyText::CREDENTIAL_TYPE);
-      $provides_type = PassphraseCredentialTypeSSHPrivateKey::PROVIDES_TYPE;
+        PassphraseSSHPrivateKeyTextCredentialType::CREDENTIAL_TYPE);
+      $provides_type = PassphraseSSHPrivateKeyCredentialType::PROVIDES_TYPE;
 
       $page->addRemarkupInstructions(
         pht(
-          'Choose or add the SSH credentials to use to connect to the the '.
+          'Choose or add the SSH credentials to use to connect to the '.
           'repository hosted at:'.
           "\n\n".
           "  lang=text\n".
@@ -607,8 +530,8 @@ final class DiffusionRepositoryCreateController
       $c_credential->setLabel(pht('Password'));
       $c_credential->setAllowNull(true);
       $c_credential->setCredentialType(
-        PassphraseCredentialTypePassword::CREDENTIAL_TYPE);
-      $provides_type = PassphraseCredentialTypePassword::PROVIDES_TYPE;
+        PassphrasePasswordCredentialType::CREDENTIAL_TYPE);
+      $provides_type = PassphrasePasswordCredentialType::PROVIDES_TYPE;
 
       $page->addRemarkupInstructions(
         pht(
@@ -663,7 +586,7 @@ final class DiffusionRepositoryCreateController
           pht('You must choose an SSH credential to connect over SSH.'));
       }
 
-      $ssh_type = PassphraseCredentialTypeSSHPrivateKey::PROVIDES_TYPE;
+      $ssh_type = PassphraseSSHPrivateKeyCredentialType::PROVIDES_TYPE;
       if ($credential->getProvidesType() !== $ssh_type) {
         $c_credential->setError(pht('Invalid'));
         $page->addPageError(
@@ -674,7 +597,7 @@ final class DiffusionRepositoryCreateController
 
     } else if ($this->isUsernamePasswordProtocol($proto)) {
       if ($credential) {
-        $password_type = PassphraseCredentialTypePassword::PROVIDES_TYPE;
+        $password_type = PassphrasePasswordCredentialType::PROVIDES_TYPE;
         if ($credential->getProvidesType() !== $password_type) {
         $c_credential->setError(pht('Invalid'));
         $page->addPageError(
@@ -729,15 +652,15 @@ final class DiffusionRepositoryCreateController
       ->setName('pushPolicy');
 
     return id(new PHUIFormPageView())
-        ->setPageName(pht('Policies'))
-        ->setValidateFormPageCallback(array($this, 'validatePolicyPage'))
-        ->setAdjustFormPageCallback(array($this, 'adjustPolicyPage'))
-        ->setUser($viewer)
-        ->addRemarkupInstructions(
-          pht('Select access policies for this repository.'))
-        ->addControl($view_policy)
-        ->addControl($edit_policy)
-        ->addControl($push_policy);
+      ->setPageName(pht('Policies'))
+      ->setValidateFormPageCallback(array($this, 'validatePolicyPage'))
+      ->setAdjustFormPageCallback(array($this, 'adjustPolicyPage'))
+      ->setUser($viewer)
+      ->addRemarkupInstructions(
+        pht('Select access policies for this repository.'))
+      ->addControl($view_policy)
+      ->addControl($edit_policy)
+      ->addControl($push_policy);
   }
 
   public function adjustPolicyPage(PHUIFormPageView $page) {

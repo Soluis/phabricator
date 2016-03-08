@@ -18,6 +18,10 @@ final class PHUIDiffInlineCommentDetailView
     return $this;
   }
 
+  public function isHidden() {
+    return $this->inlineComment->isHidden();
+  }
+
   public function setHandles(array $handles) {
     assert_instances_of($handles, 'PhabricatorObjectHandle');
     $this->handles = $handles;
@@ -150,7 +154,7 @@ final class PHUIDiffInlineCommentDetailView
       }
 
       $ghost_icon = id(new PHUIIconView())
-        ->setIconFont($ghosticon)
+        ->setIcon($ghosticon)
         ->addSigil('has-tooltip')
         ->setMetadata(
           array(
@@ -186,94 +190,94 @@ final class PHUIDiffInlineCommentDetailView
       }
     }
 
-    $action_buttons = new PHUIButtonBarView();
-    $action_buttons->addClass('mml');
     $nextprev = null;
     if (!$this->preview) {
       $nextprev = new PHUIButtonBarView();
-      $nextprev->addClass('mml');
+      $nextprev->setBorderless(true);
+      $nextprev->addClass('inline-button-divider');
+
+
       $up = id(new PHUIButtonView())
         ->setTag('a')
-        ->setColor(PHUIButtonView::SIMPLE)
         ->setTooltip(pht('Previous'))
-        ->setIconFont('fa-chevron-up')
+        ->setIcon('fa-chevron-up')
         ->addSigil('differential-inline-prev')
         ->setMustCapture(true);
 
       $down = id(new PHUIButtonView())
         ->setTag('a')
-        ->setColor(PHUIButtonView::SIMPLE)
         ->setTooltip(pht('Next'))
-        ->setIconFont('fa-chevron-down')
+        ->setIcon('fa-chevron-down')
         ->addSigil('differential-inline-next')
         ->setMustCapture(true);
+
+      if ($this->canHide()) {
+        $hide = id(new PHUIButtonView())
+          ->setTag('a')
+          ->setTooltip(pht('Hide Comment'))
+          ->setIcon('fa-times')
+          ->addSigil('hide-inline')
+          ->setMustCapture(true);
+
+        $nextprev->addButton($hide);
+      }
 
       $nextprev->addButton($up);
       $nextprev->addButton($down);
 
+      $action_buttons = array();
       if ($this->allowReply) {
-
         if (!$is_synthetic) {
-
           // NOTE: No product reason why you can't reply to these, but the reply
           // mechanism currently sends the inline comment ID to the server, not
           // file/line information, and synthetic comments don't have an inline
           // comment ID.
 
-          $reply_button = id(new PHUIButtonView())
+          $action_buttons[] = id(new PHUIButtonView())
             ->setTag('a')
-            ->setColor(PHUIButtonView::SIMPLE)
-            ->setIconFont('fa-reply')
+            ->setIcon('fa-reply')
             ->setTooltip(pht('Reply'))
             ->addSigil('differential-inline-reply')
             ->setMustCapture(true);
-          $action_buttons->addButton($reply_button);
         }
-
       }
     }
 
     $anchor_name = $this->getAnchorName();
 
     if ($this->editable && !$this->preview) {
-      $edit_button = id(new PHUIButtonView())
+      $action_buttons[] = id(new PHUIButtonView())
         ->setTag('a')
-        ->setColor(PHUIButtonView::SIMPLE)
-        ->setIconFont('fa-pencil')
+        ->setIcon('fa-pencil')
         ->setTooltip(pht('Edit'))
         ->addSigil('differential-inline-edit')
         ->setMustCapture(true);
-      $action_buttons->addButton($edit_button);
 
-      $delete_button = id(new PHUIButtonView())
+      $action_buttons[] = id(new PHUIButtonView())
         ->setTag('a')
-        ->setColor(PHUIButtonView::SIMPLE)
-        ->setIconFont('fa-trash-o')
+        ->setIcon('fa-trash-o')
         ->setTooltip(pht('Delete'))
         ->addSigil('differential-inline-delete')
         ->setMustCapture(true);
-      $action_buttons->addButton($delete_button);
 
     } else if ($this->preview) {
       $links[] = javelin_tag(
         'a',
         array(
-          'class' => 'button simple msl',
-          'meta'        => array(
+          'class'  => 'inline-button-divider pml msl',
+          'meta'  => array(
             'anchor' => $anchor_name,
           ),
-          'sigil'       => 'differential-inline-preview-jump',
+          'sigil'  => 'differential-inline-preview-jump',
         ),
         pht('Not Visible'));
 
-      $delete_button = id(new PHUIButtonView())
+      $action_buttons[] = id(new PHUIButtonView())
         ->setTag('a')
-        ->setColor(PHUIButtonView::SIMPLE)
         ->setTooltip(pht('Delete'))
-        ->setIconFont('fa-trash-o')
+        ->setIcon('fa-trash-o')
         ->addSigil('differential-inline-delete')
         ->setMustCapture(true);
-      $action_buttons->addButton($delete_button);
     }
 
     $done_button = null;
@@ -334,7 +338,7 @@ final class PHUIDiffInlineCommentDetailView
           ));
       } else {
         if ($is_done) {
-          $icon = id(new PHUIIconView())->setIconFont('fa-check sky msr');
+          $icon = id(new PHUIIconView())->setIcon('fa-check sky msr');
           $label = pht('Done');
           $class = 'button-done';
         } else {
@@ -394,6 +398,16 @@ final class PHUIDiffInlineCommentDetailView
       }
     }
 
+    $actions = null;
+    if ($action_buttons) {
+      $actions = new PHUIButtonBarView();
+      $actions->setBorderless(true);
+      $actions->addClass('inline-button-divider');
+      foreach ($action_buttons as $button) {
+        $actions->addButton($button);
+      }
+    }
+
     $group_left = phutil_tag(
       'div',
       array(
@@ -415,7 +429,7 @@ final class PHUIDiffInlineCommentDetailView
         $anchor,
         $done_button,
         $links,
-        $action_buttons,
+        $actions,
         $nextprev,
       ));
 
@@ -437,6 +451,29 @@ final class PHUIDiffInlineCommentDetailView
       ));
 
     return $markup;
+  }
+
+  private function canHide() {
+    $inline = $this->inlineComment;
+
+    if ($inline->isDraft()) {
+      return false;
+    }
+
+    if (!$inline->getID()) {
+      return false;
+    }
+
+    $viewer = $this->getUser();
+    if (!$viewer->isLoggedIn()) {
+      return false;
+    }
+
+    if (!$inline->supportsHiding()) {
+      return false;
+    }
+
+    return true;
   }
 
 }

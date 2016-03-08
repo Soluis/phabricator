@@ -15,8 +15,17 @@ final class PhabricatorEmailPreferencesSettingsPanel
     return pht('Email');
   }
 
+  public function isEditableByAdministrators() {
+    if ($this->getUser()->getIsMailingList()) {
+      return true;
+    }
+
+    return false;
+  }
+
   public function processRequest(AphrontRequest $request) {
-    $user = $request->getUser();
+    $viewer = $this->getViewer();
+    $user = $this->getUser();
 
     $preferences = $user->loadPreferences();
 
@@ -52,7 +61,7 @@ final class PhabricatorEmailPreferencesSettingsPanel
 
     $form = new AphrontFormView();
     $form
-      ->setUser($user)
+      ->setUser($viewer)
       ->appendRemarkupInstructions(
         pht(
           'These settings let you control how Phabricator notifies you about '.
@@ -182,16 +191,12 @@ final class PhabricatorEmailPreferencesSettingsPanel
   }
 
   private function getAllEditorsWithTags(PhabricatorUser $user) {
-    $editors = id(new PhutilSymbolLoader())
+    $editors = id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorApplicationTransactionEditor')
-      ->loadObjects();
+      ->setFilterMethod('getMailTagsMap')
+      ->execute();
 
     foreach ($editors as $key => $editor) {
-      // Remove editors which do not support mail tags.
-      if (!$editor->getMailTagsMap()) {
-        unset($editors[$key]);
-      }
-
       // Remove editors for applications which are not installed.
       $app = $editor->getEditorApplicationClass();
       if ($app !== null) {

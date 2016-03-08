@@ -24,10 +24,6 @@ abstract class AphrontController extends Phobject {
     return;
   }
 
-  public function didProcessRequest($response) {
-    return $response;
-  }
-
   public function handleRequest(AphrontRequest $request) {
     if (method_exists($this, 'processRequest')) {
       return $this->processRequest();
@@ -35,8 +31,14 @@ abstract class AphrontController extends Phobject {
 
     throw new PhutilMethodNotImplementedException(
       pht(
-        'Controllers must implement either handleRequest() (recommended) '.
-        'or processRequest() (deprecated).'));
+        'Controllers must implement either %s (recommended) '.
+        'or %s (deprecated).',
+        'handleRequest()',
+        'processRequest()'));
+  }
+
+  public function willSendResponse(AphrontResponse $response) {
+    return $response;
   }
 
   final public function setRequest(AphrontRequest $request) {
@@ -46,7 +48,7 @@ abstract class AphrontController extends Phobject {
 
   final public function getRequest() {
     if (!$this->request) {
-      throw new Exception(pht('Call setRequest() before getRequest()!'));
+      throw new PhutilInvalidStateException('setRequest');
     }
     return $this->request;
   }
@@ -81,10 +83,12 @@ abstract class AphrontController extends Phobject {
   }
 
   public function getDefaultResourceSource() {
-    throw new Exception(
+    throw new PhutilMethodNotImplementedException(
       pht(
-        'A Controller must implement getDefaultResourceSource() before you '.
-        'can invoke requireResource() or initBehavior().'));
+        'A Controller must implement %s before you can invoke %s or %s.',
+        'getDefaultResourceSource()',
+        'requireResource()',
+        'initBehavior()'));
   }
 
   public function requireResource($symbol) {

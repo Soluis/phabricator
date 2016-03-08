@@ -11,7 +11,7 @@ final class PhabricatorMultimeterApplication
     return '/multimeter/';
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-motorcycle';
   }
 
@@ -39,6 +39,15 @@ final class PhabricatorMultimeterApplication
     return array(
       '/multimeter/' => array(
         '' => 'MultimeterSampleController',
+      ),
+    );
+  }
+
+  public function getHelpDocumentationArticles(PhabricatorUser $viewer) {
+    return array(
+      array(
+        'name' => pht('Multimeter User Guide'),
+        'href' => PhabricatorEnv::getDoclink('Multimeter User Guide'),
       ),
     );
   }

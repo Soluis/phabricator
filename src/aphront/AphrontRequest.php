@@ -5,7 +5,7 @@
  * @task cookie   Managing Cookies
  * @task cluster  Working With a Phabricator Cluster
  */
-final class AphrontRequest {
+final class AphrontRequest extends Phobject {
 
   // NOTE: These magic request-type parameters are automatically included in
   // certain requests (e.g., by phabricator_form(), JX.Request,
@@ -26,7 +26,10 @@ final class AphrontRequest {
   private $requestData;
   private $user;
   private $applicationConfiguration;
-  private $uriData;
+  private $site;
+  private $controller;
+  private $uriData = array();
+  private $cookiePrefix;
 
   public function __construct($host, $path) {
     $this->host = $host;
@@ -76,6 +79,24 @@ final class AphrontRequest {
     return $uri->getDomain();
   }
 
+  public function setSite(AphrontSite $site) {
+    $this->site = $site;
+    return $this;
+  }
+
+  public function getSite() {
+    return $this->site;
+  }
+
+  public function setController(AphrontController $controller) {
+    $this->controller = $controller;
+    return $this;
+  }
+
+  public function getController() {
+    return $this->controller;
+  }
+
 
 /* -(  Accessing Request Data  )--------------------------------------------- */
 
@@ -102,6 +123,11 @@ final class AphrontRequest {
    */
   public function getInt($name, $default = null) {
     if (isset($this->requestData[$name])) {
+      // Converting from array to int is "undefined". Don't rely on whatever
+      // PHP decides to do.
+      if (is_array($this->requestData[$name])) {
+        return $default;
+      }
       return (int)$this->requestData[$name];
     } else {
       return $default;
@@ -213,6 +239,10 @@ final class AphrontRequest {
 
   public static function getCSRFHeaderName() {
     return 'X-Phabricator-Csrf';
+  }
+
+  public static function getViaHeaderName() {
+    return 'X-Phabricator-Via';
   }
 
   public function validateCSRF() {
@@ -512,8 +542,12 @@ final class AphrontRequest {
     return $this->isFormPost() && $this->getStr('__dialog__');
   }
 
-  public function getRemoteAddr() {
-    return $_SERVER['REMOTE_ADDR'];
+  public function getRemoteAddress() {
+    $address = $_SERVER['REMOTE_ADDR'];
+    if (!strlen($address)) {
+      return null;
+    }
+    return substr($address, 0, 64);
   }
 
   public function isHTTPS() {

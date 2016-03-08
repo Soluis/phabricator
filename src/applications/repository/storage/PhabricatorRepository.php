@@ -11,7 +11,8 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
     PhabricatorFlaggableInterface,
     PhabricatorMarkupInterface,
     PhabricatorDestructibleInterface,
-    PhabricatorProjectInterface {
+    PhabricatorProjectInterface,
+    PhabricatorSpacesInterface {
 
   /**
    * Shortest hash we'll recognize in raw "a829f32" form.
@@ -45,6 +46,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
 
   protected $name;
   protected $callsign;
+  protected $repositorySlug;
   protected $uuid;
   protected $viewPolicy;
   protected $editPolicy;
@@ -54,6 +56,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
   protected $details = array();
   protected $credentialPHID;
   protected $almanacServicePHID;
+  protected $spacePHID;
 
   private $commitCount = self::ATTACHABLE;
   private $mostRecentCommit = self::ATTACHABLE;
@@ -72,7 +75,8 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
     $repository = id(new PhabricatorRepository())
       ->setViewPolicy($view_policy)
       ->setEditPolicy($edit_policy)
-      ->setPushPolicy($push_policy);
+      ->setPushPolicy($push_policy)
+      ->setSpacePHID($actor->getDefaultSpacePHID());
 
     // Put the repository in "Importing" mode until we finish
     // parsing it.
@@ -89,7 +93,8 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
       ),
       self::CONFIG_COLUMN_SCHEMA => array(
         'name' => 'sort255',
-        'callsign' => 'sort32',
+        'callsign' => 'sort32?',
+        'repositorySlug' => 'sort64?',
         'versionControlSystem' => 'text32',
         'uuid' => 'text64?',
         'pushPolicy' => 'policy',
@@ -97,11 +102,6 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
         'almanacServicePHID' => 'phid?',
       ),
       self::CONFIG_KEY_SCHEMA => array(
-        'key_phid' => null,
-        'phid' => array(
-          'columns' => array('phid'),
-          'unique' => true,
-        ),
         'callsign' => array(
           'columns' => array('callsign'),
           'unique' => true,
@@ -111,6 +111,10 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
         ),
         'key_vcs' => array(
           'columns' => array('versionControlSystem'),
+        ),
+        'key_slug' => array(
+          'columns' => array('repositorySlug'),
+          'unique' => true,
         ),
       ),
     ) + parent::getConfiguration();
@@ -135,11 +139,45 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
       'isActive'    => $this->isTracked(),
       'isHosted'    => $this->isHosted(),
       'isImporting' => $this->isImporting(),
+      'encoding'    => $this->getDetail('encoding'),
+      'staging' => array(
+        'supported' => $this->supportsStaging(),
+        'prefix' => 'phabricator',
+        'uri' => $this->getStagingURI(),
+      ),
     );
   }
 
   public function getMonogram() {
-    return 'r'.$this->getCallsign();
+    $callsign = $this->getCallsign();
+    if (strlen($callsign)) {
+      return "r{$callsign}";
+    }
+
+    $id = $this->getID();
+    return "R{$id}";
+  }
+
+  public function getDisplayName() {
+    $slug = $this->getRepositorySlug();
+    if (strlen($slug)) {
+      return $slug;
+    }
+
+    return $this->getMonogram();
+  }
+
+  public function getAllMonograms() {
+    $monograms = array();
+
+    $monograms[] = 'R'.$this->getID();
+
+    $callsign = $this->getCallsign();
+    if (strlen($callsign)) {
+      $monograms[] = 'r'.$callsign;
+    }
+
+    return $monograms;
   }
 
   public function getDetail($key, $default = null) {
@@ -268,7 +306,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
    * @return string
    */
   public function getCloneName() {
-    $name = $this->getDetail('clone-name');
+    $name = $this->getRepositorySlug();
 
     // Make some reasonable effort to produce reasonable default directory
     // names from repository names.
@@ -283,6 +321,106 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
     }
 
     return $name;
+  }
+
+  public static function isValidRepositorySlug($slug) {
+    try {
+      self::assertValidRepositorySlug($slug);
+      return true;
+    } catch (Exception $ex) {
+      return false;
+    }
+  }
+
+  public static function assertValidRepositorySlug($slug) {
+    if (!strlen($slug)) {
+      throw new Exception(
+        pht(
+          'The empty string is not a valid repository short name. '.
+          'Repository short names must be at least one character long.'));
+    }
+
+    if (strlen($slug) > 64) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names must not be longer than 64 characters.',
+          $slug));
+    }
+
+    if (preg_match('/[^a-zA-Z0-9._-]/', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names may only contain letters, numbers, periods, hyphens '.
+          'and underscores.',
+          $slug));
+    }
+
+    if (!preg_match('/^[a-zA-Z0-9]/', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names must begin with a letter or number.',
+          $slug));
+    }
+
+    if (!preg_match('/[a-zA-Z0-9]\z/', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names must end with a letter or number.',
+          $slug));
+    }
+
+    if (preg_match('/__|--|\\.\\./', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names must not contain multiple consecutive underscores, '.
+          'hyphens, or periods.',
+          $slug));
+    }
+
+    if (preg_match('/^[A-Z]+\z/', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names may not contain only uppercase letters.',
+          $slug));
+    }
+
+    if (preg_match('/^\d+\z/', $slug)) {
+      throw new Exception(
+        pht(
+          'The name "%s" is not a valid repository short name. Repository '.
+          'short names may not contain only numbers.',
+          $slug));
+    }
+  }
+
+  public static function assertValidCallsign($callsign) {
+    if (!strlen($callsign)) {
+      throw new Exception(
+        pht(
+          'A repository callsign must be at least one character long.'));
+    }
+
+    if (strlen($callsign) > 32) {
+      throw new Exception(
+        pht(
+          'The callsign "%s" is not a valid repository callsign. Callsigns '.
+          'must be no more than 32 bytes long.',
+          $callsign));
+    }
+
+    if (!preg_match('/^[A-Z]+\z/', $callsign)) {
+      throw new Exception(
+        pht(
+          'The callsign "%s" is not a valid repository callsign. Callsigns '.
+          'may only contain UPPERCASE letters.',
+          $callsign));
+    }
   }
 
 
@@ -569,33 +707,283 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
   }
 
   public function getURI() {
-    return '/diffusion/'.$this->getCallsign().'/';
+    $callsign = $this->getCallsign();
+    if (strlen($callsign)) {
+      return "/diffusion/{$callsign}/";
+    }
+
+    $id = $this->getID();
+    return "/diffusion/{$id}/";
   }
 
-  public function getNormalizedPath() {
-    $uri = (string)$this->getCloneURIObject();
+  public function getPathURI($path) {
+    return $this->getURI().$path;
+  }
 
+  public function getCommitURI($identifier) {
+    $callsign = $this->getCallsign();
+    if (strlen($callsign)) {
+      return "/r{$callsign}{$identifier}";
+    }
+
+    $id = $this->getID();
+    return "/R{$id}:{$identifier}";
+  }
+
+  public static function parseRepositoryServicePath($request_path) {
+    // NOTE: In Mercurial over SSH, the path will begin without a leading "/",
+    // so we're matching it optionally.
+
+    $patterns = array(
+      '(^'.
+        '(?P<base>/?diffusion/(?P<identifier>[A-Z]+|[0-9]\d*))'.
+        '(?P<path>(?:/.*)?)'.
+      '\z)',
+    );
+
+    $identifier = null;
+    foreach ($patterns as $pattern) {
+      $matches = null;
+      if (!preg_match($pattern, $request_path, $matches)) {
+        continue;
+      }
+
+      $identifier = $matches['identifier'];
+      $base = $matches['base'];
+      $path = $matches['path'];
+      break;
+    }
+
+    if ($identifier === null) {
+      return null;
+    }
+
+    return array(
+      'identifier' => $identifier,
+      'base' => $base,
+      'path' => $path,
+    );
+  }
+
+  public function getCanonicalPath($request_path) {
+    $standard_pattern =
+      '(^'.
+        '(?P<prefix>/diffusion/)'.
+        '(?P<identifier>[^/]+)'.
+        '(?P<suffix>(?:/.*)?)'.
+      '\z)';
+
+    $matches = null;
+    if (preg_match($standard_pattern, $request_path, $matches)) {
+      $prefix = $matches['prefix'];
+
+      $callsign = $this->getCallsign();
+      if ($callsign) {
+        $identifier = $callsign;
+      } else {
+        $identifier = $this->getID();
+      }
+
+      $suffix = $matches['suffix'];
+      if (!strlen($suffix)) {
+        $suffix = '/';
+      }
+
+      return $prefix.$identifier.$suffix;
+    }
+
+    $commit_pattern =
+      '(^'.
+        '(?P<prefix>/)'.
+        '(?P<monogram>'.
+          '(?:'.
+            'r(?P<repositoryCallsign>[A-Z]+)'.
+            '|'.
+            'R(?P<repositoryID>[1-9]\d*):'.
+          ')'.
+          '(?P<commit>[a-f0-9]+)'.
+        ')'.
+      '\z)';
+
+    $matches = null;
+    if (preg_match($commit_pattern, $request_path, $matches)) {
+      $commit = $matches['commit'];
+      return $this->getCommitURI($commit);
+    }
+
+    return null;
+  }
+
+  public function generateURI(array $params) {
+    $req_branch = false;
+    $req_commit = false;
+
+    $action = idx($params, 'action');
+    switch ($action) {
+      case 'history':
+      case 'browse':
+      case 'change':
+      case 'lastmodified':
+      case 'tags':
+      case 'branches':
+      case 'lint':
+      case 'pathtree':
+      case 'refs':
+        break;
+      case 'branch':
+        // NOTE: This does not actually require a branch, and won't have one
+        // in Subversion. Possibly this should be more clear.
+        break;
+      case 'commit':
+      case 'rendering-ref':
+        $req_commit = true;
+        break;
+      default:
+        throw new Exception(
+          pht(
+            'Action "%s" is not a valid repository URI action.',
+            $action));
+    }
+
+    $path     = idx($params, 'path');
+    $branch   = idx($params, 'branch');
+    $commit   = idx($params, 'commit');
+    $line     = idx($params, 'line');
+
+    if ($req_commit && !strlen($commit)) {
+      throw new Exception(
+        pht(
+          'Diffusion URI action "%s" requires commit!',
+          $action));
+    }
+
+    if ($req_branch && !strlen($branch)) {
+      throw new Exception(
+        pht(
+          'Diffusion URI action "%s" requires branch!',
+          $action));
+    }
+
+    if ($action === 'commit') {
+      return $this->getCommitURI($commit);
+    }
+
+
+    $identifier = $this->getID();
+
+    $callsign = $this->getCallsign();
+    if ($callsign !== null) {
+      $identifier = $callsign;
+    }
+
+    if (strlen($identifier)) {
+      $identifier = phutil_escape_uri_path_component($identifier);
+    }
+
+    if (strlen($path)) {
+      $path = ltrim($path, '/');
+      $path = str_replace(array(';', '$'), array(';;', '$$'), $path);
+      $path = phutil_escape_uri($path);
+    }
+
+    if (strlen($branch)) {
+      $branch = phutil_escape_uri_path_component($branch);
+      $path = "{$branch}/{$path}";
+    }
+
+    if (strlen($commit)) {
+      $commit = str_replace('$', '$$', $commit);
+      $commit = ';'.phutil_escape_uri($commit);
+    }
+
+    if (strlen($line)) {
+      $line = '$'.phutil_escape_uri($line);
+    }
+
+    switch ($action) {
+      case 'change':
+      case 'history':
+      case 'browse':
+      case 'lastmodified':
+      case 'tags':
+      case 'branches':
+      case 'lint':
+      case 'pathtree':
+      case 'refs':
+        $uri = "/diffusion/{$identifier}/{$action}/{$path}{$commit}{$line}";
+        break;
+      case 'branch':
+        if (strlen($path)) {
+          $uri = "/diffusion/{$identifier}/repository/{$path}";
+        } else {
+          $uri = "/diffusion/{$identifier}/";
+        }
+        break;
+      case 'external':
+        $commit = ltrim($commit, ';');
+        $uri = "/diffusion/external/{$commit}/";
+        break;
+      case 'rendering-ref':
+        // This isn't a real URI per se, it's passed as a query parameter to
+        // the ajax changeset stuff but then we parse it back out as though
+        // it came from a URI.
+        $uri = rawurldecode("{$path}{$commit}");
+        break;
+    }
+
+    if ($action == 'rendering-ref') {
+      return $uri;
+    }
+
+    $uri = new PhutilURI($uri);
+
+    if (isset($params['lint'])) {
+      $params['params'] = idx($params, 'params', array()) + array(
+        'lint' => $params['lint'],
+      );
+    }
+
+    if (idx($params, 'params')) {
+      $uri->setQueryParams($params['params']);
+    }
+
+    return $uri;
+  }
+
+  public function updateURIIndex() {
+    $uris = array(
+      (string)$this->getCloneURIObject(),
+    );
+
+    foreach ($uris as $key => $uri) {
+      $uris[$key] = $this->getNormalizedURI($uri)
+        ->getNormalizedPath();
+    }
+
+    PhabricatorRepositoryURIIndex::updateRepositoryURIs(
+      $this->getPHID(),
+      $uris);
+
+    return $this;
+  }
+
+  private function getNormalizedURI($uri) {
     switch ($this->getVersionControlSystem()) {
       case PhabricatorRepositoryType::REPOSITORY_TYPE_GIT:
-        $normalized_uri = new PhabricatorRepositoryURINormalizer(
+        return new PhabricatorRepositoryURINormalizer(
           PhabricatorRepositoryURINormalizer::TYPE_GIT,
           $uri);
-        break;
       case PhabricatorRepositoryType::REPOSITORY_TYPE_SVN:
-        $normalized_uri = new PhabricatorRepositoryURINormalizer(
+        return new PhabricatorRepositoryURINormalizer(
           PhabricatorRepositoryURINormalizer::TYPE_SVN,
           $uri);
-        break;
       case PhabricatorRepositoryType::REPOSITORY_TYPE_MERCURIAL:
-        $normalized_uri = new PhabricatorRepositoryURINormalizer(
+        return new PhabricatorRepositoryURINormalizer(
           PhabricatorRepositoryURINormalizer::TYPE_MERCURIAL,
           $uri);
-        break;
       default:
         throw new Exception(pht('Unrecognized version control system.'));
     }
-
-    return $normalized_uri->getNormalizedPath();
   }
 
   public function isTracked() {
@@ -673,7 +1061,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
     return $this->isBranchInFilter($branch, 'branch-filter');
   }
 
-  public function formatCommitName($commit_identifier) {
+  public function formatCommitName($commit_identifier, $local = false) {
     $vcs = $this->getVersionControlSystem();
 
     $type_git = PhabricatorRepositoryType::REPOSITORY_TYPE_GIT;
@@ -682,18 +1070,76 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
     $is_git = ($vcs == $type_git);
     $is_hg = ($vcs == $type_hg);
     if ($is_git || $is_hg) {
-      $short_identifier = substr($commit_identifier, 0, 12);
+      $name = substr($commit_identifier, 0, 12);
+      $need_scope = false;
     } else {
-      $short_identifier = $commit_identifier;
+      $name = $commit_identifier;
+      $need_scope = true;
     }
 
-    return 'r'.$this->getCallsign().$short_identifier;
+    if (!$local) {
+      $need_scope = true;
+    }
+
+    if ($need_scope) {
+      $callsign = $this->getCallsign();
+      if ($callsign) {
+        $scope = "r{$callsign}";
+      } else {
+        $id = $this->getID();
+        $scope = "R{$id}:";
+      }
+      $name = $scope.$name;
+    }
+
+    return $name;
   }
 
   public function isImporting() {
     return (bool)$this->getDetail('importing', false);
   }
 
+  public function loadImportProgress() {
+    $progress = queryfx_all(
+      $this->establishConnection('r'),
+      'SELECT importStatus, count(*) N FROM %T WHERE repositoryID = %d
+        GROUP BY importStatus',
+      id(new PhabricatorRepositoryCommit())->getTableName(),
+      $this->getID());
+
+    $done = 0;
+    $total = 0;
+    foreach ($progress as $row) {
+      $total += $row['N'] * 4;
+      $status = $row['importStatus'];
+      if ($status & PhabricatorRepositoryCommit::IMPORTED_MESSAGE) {
+        $done += $row['N'];
+      }
+      if ($status & PhabricatorRepositoryCommit::IMPORTED_CHANGE) {
+        $done += $row['N'];
+      }
+      if ($status & PhabricatorRepositoryCommit::IMPORTED_OWNERS) {
+        $done += $row['N'];
+      }
+      if ($status & PhabricatorRepositoryCommit::IMPORTED_HERALD) {
+        $done += $row['N'];
+      }
+    }
+
+    if ($total) {
+      $ratio = ($done / $total);
+    } else {
+      $ratio = 0;
+    }
+
+    // Cap this at "99.99%", because it's confusing to users when the actual
+    // fraction is "99.996%" and it rounds up to "100.00%".
+    if ($ratio > 0.9999) {
+      $ratio = 0.9999;
+    }
+
+    return $ratio;
+  }
 
   /**
    * Should this repository publish feed, notifications, audits, and email?
@@ -706,7 +1152,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
       return false;
     }
 
-    if ($this->getDetail('disable-herald')) {
+    if ($this->getDetail('herald-disabled')) {
       return false;
     }
 
@@ -1160,12 +1606,6 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
         $path->delete();
       }
 
-      $projects = id(new PhabricatorRepositoryArcanistProject())
-        ->loadAllWhere('repositoryID = %d', $this->getID());
-      foreach ($projects as $project) {
-        $project->delete();
-      }
-
       queryfx(
         $this->establishConnection('w'),
         'DELETE FROM %T WHERE repositoryPHID = %s',
@@ -1598,6 +2038,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
       ->setViewer(PhabricatorUser::getOmnipotentUser())
       ->withPHIDs(array($service_phid))
       ->needBindings(true)
+      ->needProperties(true)
       ->executeOne();
     if (!$service) {
       throw new Exception(
@@ -1606,7 +2047,7 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
           'be loaded.'));
     }
 
-    $service_type = $service->getServiceType();
+    $service_type = $service->getServiceImplementation();
     if (!($service_type instanceof AlmanacClusterRepositoryServiceType)) {
       throw new Exception(
         pht(
@@ -1796,6 +2237,49 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
   }
 
 
+/* -(  Staging  )------------------------------------------------------------ */
+
+
+  public function supportsStaging() {
+    return $this->isGit();
+  }
+
+
+  public function getStagingURI() {
+    if (!$this->supportsStaging()) {
+      return null;
+    }
+    return $this->getDetail('staging-uri', null);
+  }
+
+
+/* -(  Automation  )--------------------------------------------------------- */
+
+
+  public function supportsAutomation() {
+    return $this->isGit();
+  }
+
+  public function canPerformAutomation() {
+    if (!$this->supportsAutomation()) {
+      return false;
+    }
+
+    if (!$this->getAutomationBlueprintPHIDs()) {
+      return false;
+    }
+
+    return true;
+  }
+
+  public function getAutomationBlueprintPHIDs() {
+    if (!$this->supportsAutomation()) {
+      return array();
+    }
+    return $this->getDetail('automation.blueprintPHIDs', array());
+  }
+
+
 /* -(  PhabricatorApplicationTransactionInterface  )------------------------- */
 
 
@@ -1887,12 +2371,43 @@ final class PhabricatorRepository extends PhabricatorRepositoryDAO
 
 /* -(  PhabricatorDestructibleInterface  )----------------------------------- */
 
+
   public function destroyObjectPermanently(
     PhabricatorDestructionEngine $engine) {
 
+    $phid = $this->getPHID();
+
     $this->openTransaction();
-    $this->delete();
+
+      $this->delete();
+
+      PhabricatorRepositoryURIIndex::updateRepositoryURIs($phid, array());
+
+      $books = id(new DivinerBookQuery())
+        ->setViewer($engine->getViewer())
+        ->withRepositoryPHIDs(array($phid))
+        ->execute();
+      foreach ($books as $book) {
+        $engine->destroyObject($book);
+      }
+
+      $atoms = id(new DivinerAtomQuery())
+        ->setViewer($engine->getViewer())
+        ->withRepositoryPHIDs(array($phid))
+        ->execute();
+      foreach ($atoms as $atom) {
+        $engine->destroyObject($atom);
+      }
+
     $this->saveTransaction();
+  }
+
+
+/* -(  PhabricatorSpacesInterface  )----------------------------------------- */
+
+
+  public function getSpacePHID() {
+    return $this->spacePHID;
   }
 
 }

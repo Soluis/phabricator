@@ -113,6 +113,8 @@ final class DifferentialChangesetListView extends AphrontView {
   }
 
   public function render() {
+    $viewer = $this->getViewer();
+
     $this->requireResource('differential-changeset-view-css');
 
     $changesets = $this->changesets;
@@ -129,8 +131,8 @@ final class DifferentialChangesetListView extends AphrontView {
       array(
         'pht' => array(
           'Open in Editor' => pht('Open in Editor'),
-          'Show Entire File' => pht('Show Entire File'),
-          'Entire File Shown' => pht('Entire File Shown'),
+          'Show All Context' => pht('Show All Context'),
+          'All Context Shown' => pht('All Context Shown'),
           "Can't Toggle Unloaded File" => pht("Can't Toggle Unloaded File"),
           'Expand File' => pht('Expand File'),
           'Collapse File' => pht('Collapse File'),
@@ -148,7 +150,7 @@ final class DifferentialChangesetListView extends AphrontView {
       ));
 
     $renderer = DifferentialChangesetParser::getDefaultRendererForViewer(
-      $this->getUser());
+      $viewer);
 
     $output = array();
     $ids = array();
@@ -163,7 +165,7 @@ final class DifferentialChangesetListView extends AphrontView {
       $ref = $this->references[$key];
 
       $detail = id(new DifferentialChangesetDetailView())
-        ->setUser($this->getUser());
+        ->setUser($viewer);
 
       $uniq_id = 'diff-'.$changeset->getAnchorName();
       $detail->setID($uniq_id);
@@ -190,7 +192,7 @@ final class DifferentialChangesetListView extends AphrontView {
       } else {
         $detail->setAutoload(isset($this->visibleChangesets[$key]));
         if (isset($this->visibleChangesets[$key])) {
-          $load = 'Loading...';
+          $load = pht('Loading...');
         } else {
           $load = javelin_tag(
             'a',
@@ -232,8 +234,9 @@ final class DifferentialChangesetListView extends AphrontView {
 
     if ($this->inlineURI) {
       Javelin::initBehavior('differential-edit-inline-comments', array(
-        'uri'             => $this->inlineURI,
-        'stage'           => 'differential-review-stage',
+        'uri' => $this->inlineURI,
+        'stage' => 'differential-review-stage',
+        'revealIcon' => hsprintf('%s', new PHUIDiffRevealIconView()),
       ));
     }
 
@@ -250,6 +253,7 @@ final class DifferentialChangesetListView extends AphrontView {
 
     $object_box = id(new PHUIObjectBoxView())
       ->setHeader($header)
+      ->setCollapsed(true)
       ->appendChild($content);
 
     return $object_box;
@@ -259,6 +263,7 @@ final class DifferentialChangesetListView extends AphrontView {
     DifferentialChangesetDetailView $detail,
     $ref,
     DifferentialChangeset $changeset) {
+    $viewer = $this->getViewer();
 
     $meta = array();
 
@@ -278,7 +283,7 @@ final class DifferentialChangesetListView extends AphrontView {
       try {
         $meta['diffusionURI'] =
           (string)$repository->getDiffusionBrowseURIForPath(
-            $this->user,
+            $viewer,
             $changeset->getAbsoluteRepositoryPath($repository, $this->diff),
             idx($changeset->getMetadata(), 'line:first'),
             $this->getBranch());
@@ -306,14 +311,12 @@ final class DifferentialChangesetListView extends AphrontView {
       }
     }
 
-    $user = $this->user;
-    if ($user && $repository) {
+    if ($viewer && $repository) {
       $path = ltrim(
         $changeset->getAbsoluteRepositoryPath($repository, $this->diff),
         '/');
       $line = idx($changeset->getMetadata(), 'line:first', 1);
-      $callsign = $repository->getCallsign();
-      $editor_link = $user->loadEditorLink($path, $line, $callsign);
+      $editor_link = $viewer->loadEditorLink($path, $line, $repository);
       if ($editor_link) {
         $meta['editor'] = $editor_link;
       } else {
@@ -327,7 +330,7 @@ final class DifferentialChangesetListView extends AphrontView {
     return javelin_tag(
       'a',
       array(
-        'class'   => 'button grey small dropdown',
+        'class'   => 'button grey dropdown',
         'meta'    => $meta,
         'href'    => idx($meta, 'detailURI', '#'),
         'target'  => '_blank',

@@ -11,6 +11,9 @@ final class NuanceSource extends NuanceDAO
   protected $mailKey;
   protected $viewPolicy;
   protected $editPolicy;
+  protected $defaultQueuePHID;
+
+  private $definition;
 
   protected function getConfiguration() {
     return array(
@@ -57,13 +60,34 @@ final class NuanceSource extends NuanceDAO
     $edit_policy = $app->getPolicy(
       NuanceSourceDefaultEditCapability::CAPABILITY);
 
-    $definitions = NuanceSourceDefinition::getAllDefinitions();
-    $lucky_definition = head($definitions);
-
     return id(new NuanceSource())
       ->setViewPolicy($view_policy)
-      ->setEditPolicy($edit_policy)
-      ->setType($lucky_definition->getSourceTypeConstant());
+      ->setEditPolicy($edit_policy);
+  }
+
+  public function getDefinition() {
+    if ($this->definition === null) {
+      $definitions = NuanceSourceDefinition::getAllDefinitions();
+      if (isset($definitions[$this->getType()])) {
+        $definition = clone $definitions[$this->getType()];
+        $definition->setSourceObject($this);
+        $this->definition = $definition;
+      }
+    }
+
+    return $this->definition;
+  }
+
+  public function requireDefinition() {
+    $definition = $this->getDefinition();
+    if (!$definition) {
+      throw new Exception(
+        pht(
+          'Unable to load source definition implementation for source '.
+          'type "%s".',
+          $this->getType()));
+    }
+    return $definition;
   }
 
 
@@ -88,6 +112,9 @@ final class NuanceSource extends NuanceDAO
 
     return $timeline;
   }
+
+
+/* -(  PhabricatorPolicyInterface  )----------------------------------------- */
 
 
   public function getCapabilities() {

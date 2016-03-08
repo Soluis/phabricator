@@ -2,10 +2,6 @@
  * @provides phabricator-zindex-css
  */
 
-.phabricator-nav-column-background {
-  z-index: -1;
-}
-
 .keyboard-focus-focus-reticle {
   z-index: 1;
 }
@@ -36,6 +32,10 @@
   z-index: 2;
 }
 
+div.phui-calendar-day-event {
+  z-index: 2;
+}
+
 .slowvote-above-the-bar {
   z-index: 3;
 }
@@ -49,6 +49,10 @@
 }
 
 .phabricator-nav-local {
+  z-index: 4;
+}
+
+.project-board-header {
   z-index: 4;
 }
 
@@ -74,10 +78,6 @@
 }
 
 .dark-console {
-  z-index: 5;
-}
-
-.drag-dragging {
   z-index: 5;
 }
 
@@ -138,12 +138,20 @@ div.jx-typeahead-results {
   z-index: 15;
 }
 
+.drag-frame {
+  z-index: 16;
+}
+
 .jx-hovercard-container {
   z-index: 17;
 }
 
 .pholio-device-lightbox {
   z-index: 20;
+}
+
+.phuix-autocomplete {
+  z-index: 21;
 }
 
 .phuix-dropdown-menu {

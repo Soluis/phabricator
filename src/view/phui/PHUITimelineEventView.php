@@ -26,6 +26,17 @@ final class PHUITimelineEventView extends AphrontView {
   private $quoteRef;
   private $reallyMajorEvent;
   private $hideCommentOptions = false;
+  private $authorPHID;
+  private $badges = array();
+
+  public function setAuthorPHID($author_phid) {
+    $this->authorPHID = $author_phid;
+    return $this;
+  }
+
+  public function getAuthorPHID() {
+    return $this->authorPHID;
+  }
 
   public function setQuoteRef($quote_ref) {
     $this->quoteRef = $quote_ref;
@@ -150,6 +161,11 @@ final class PHUITimelineEventView extends AphrontView {
     return $this;
   }
 
+  public function addBadge(PHUIBadgeMiniView $badge) {
+    $this->badges[] = $badge;
+    return $this;
+  }
+
   public function setIcon($icon) {
     $this->icon = $icon;
     return $this;
@@ -220,7 +236,7 @@ final class PHUITimelineEventView extends AphrontView {
       }
 
       $icon = id(new PHUIIconView())
-        ->setIconFont($this->icon.' white')
+        ->setIcon($this->icon.' white')
         ->addClass('phui-timeline-icon');
 
       $icon = phutil_tag(
@@ -281,7 +297,7 @@ final class PHUITimelineEventView extends AphrontView {
 
     if ($items || $has_menu) {
       $icon = id(new PHUIIconView())
-        ->setIconFont('fa-caret-down');
+        ->setIcon('fa-caret-down');
       $aural = javelin_tag(
         'span',
         array(
@@ -354,13 +370,29 @@ final class PHUITimelineEventView extends AphrontView {
       ),
       '');
 
-    $image = phutil_tag(
-      'div',
-      array(
-        'style' => 'background-image: url('.$image_uri.')',
-        'class' => 'phui-timeline-image',
-      ),
-      '');
+    $image = null;
+    $badges = null;
+    if ($image_uri) {
+      $image = phutil_tag(
+        ($this->userHandle->getURI()) ? 'a' : 'div',
+        array(
+          'style' => 'background-image: url('.$image_uri.')',
+          'class' => 'phui-timeline-image',
+          'href' => $this->userHandle->getURI(),
+        ),
+        '');
+      if ($this->badges) {
+        $flex = new PHUIBadgeBoxView();
+        $flex->addItems($this->badges);
+        $flex->setCollapsed(true);
+        $badges = phutil_tag(
+          'div',
+          array(
+            'class' => 'phui-timeline-badges',
+          ),
+          $flex);
+      }
+    }
 
     $content_classes = array();
     $content_classes[] = 'phui-timeline-content';
@@ -401,7 +433,7 @@ final class PHUITimelineEventView extends AphrontView {
       array(
         'class' => implode(' ', $content_classes),
       ),
-      array($image, $wedge, $content));
+      array($image, $badges, $wedge, $content));
 
     $outer_classes = $this->classes;
     $outer_classes[] = 'phui-timeline-shell';

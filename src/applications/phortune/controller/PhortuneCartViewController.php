@@ -3,21 +3,15 @@
 final class PhortuneCartViewController
   extends PhortuneCartController {
 
-  private $id;
-
-  public function willProcessRequest(array $data) {
-    $this->id = $data['id'];
-  }
-
-  public function processRequest() {
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $request->getViewer();
+    $id = $request->getURIData('id');
 
     $authority = $this->loadMerchantAuthority();
 
     $query = id(new PhortuneCartQuery())
       ->setViewer($viewer)
-      ->withIDs(array($this->id))
+      ->withIDs(array($id))
       ->needPurchases(true);
 
     if ($authority) {
@@ -138,16 +132,15 @@ final class PhortuneCartViewController
           id(new PHUIButtonView())
             ->setTag('a')
             ->setHref($done_uri)
-            ->setIcon(id(new PHUIIconView())
-              ->setIconFont('fa-check-square green'))
+            ->setIcon('fa-check-square green')
             ->setText($cart->getDoneActionName()));
       }
     }
 
     $cart_box = id(new PHUIObjectBoxView())
       ->setHeader($header)
-      ->appendChild($properties)
-      ->appendChild($cart_table);
+      ->addPropertyList($properties)
+      ->setTable($cart_table);
 
     if ($errors) {
       $cart_box->setFormErrors($errors);
@@ -180,7 +173,7 @@ final class PhortuneCartViewController
 
     $charges = id(new PHUIObjectBoxView())
       ->setHeaderText(pht('Charges'))
-      ->appendChild($charges_table);
+      ->setTable($charges_table);
 
     $account = $cart->getAccount();
 
@@ -274,6 +267,7 @@ final class PhortuneCartViewController
     $refund_uri = $this->getApplicationURI("{$prefix}cart/{$id}/refund/");
     $update_uri = $this->getApplicationURI("{$prefix}cart/{$id}/update/");
     $accept_uri = $this->getApplicationURI("{$prefix}cart/{$id}/accept/");
+    $print_uri = $this->getApplicationURI("{$prefix}cart/{$id}/?__print__=1");
 
     $view->addAction(
       id(new PhabricatorActionView())
@@ -314,6 +308,13 @@ final class PhortuneCartViewController
           ->setIcon('fa-shopping-cart')
           ->setHref($resume_uri));
     }
+
+    $view->addAction(
+      id(new PhabricatorActionView())
+        ->setName(pht('Printable Version'))
+        ->setHref($print_uri)
+        ->setOpenInNewWindow(true)
+        ->setIcon('fa-print'));
 
     return $view;
   }

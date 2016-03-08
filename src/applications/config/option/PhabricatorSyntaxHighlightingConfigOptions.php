@@ -11,7 +11,7 @@ final class PhabricatorSyntaxHighlightingConfigOptions
     return pht('Options relating to syntax highlighting source code.');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-code';
   }
 
@@ -20,7 +20,6 @@ final class PhabricatorSyntaxHighlightingConfigOptions
   }
 
   public function getOptions() {
-
     $caches_href = PhabricatorEnv::getDocLink('Managing Caches');
 
     return array(
@@ -74,31 +73,42 @@ final class PhabricatorSyntaxHighlightingConfigOptions
           'c' => 'C',
           'coffee-script' => 'CoffeeScript',
           'cpp' => 'C++',
+          'csharp' => 'C#',
           'css' => 'CSS',
           'd' => 'D',
           'diff' => 'Diff',
           'django' => 'Django Templating',
+          'docker' => 'Docker',
           'erb' => 'Embedded Ruby/ERB',
           'erlang' => 'Erlang',
           'go' => 'Golang',
           'groovy' => 'Groovy',
           'haskell' => 'Haskell',
           'html' => 'HTML',
+          'http' => 'HTTP',
           'invisible' => 'Invisible',
           'java' => 'Java',
           'js' => 'Javascript',
           'json' => 'JSON',
+          'make' => 'Makefile',
           'mysql' => 'MySQL',
+          'nginx' => 'Nginx Configuration',
           'objc' => 'Objective-C',
           'perl' => 'Perl',
           'php' => 'PHP',
+          'postgresql' => 'PostgreSQL',
+          'pot' => 'Gettext Catalog',
           'puppet' => 'Puppet',
-          'rest' => 'reStructuredText',
-          'text' => 'Plain Text',
           'python' => 'Python',
           'rainbow' => 'Rainbow',
           'remarkup' => 'Remarkup',
+          'rst' => 'reStructuredText',
+          'robotframework' => 'RobotFramework',
           'ruby' => 'Ruby',
+          'sql' => 'SQL',
+          'tex' => 'LaTeX',
+          'text' => 'Plain Text',
+          'twig' => 'Twig',
           'xml' => 'XML',
           'yaml' => 'YAML',
         ))

@@ -5,7 +5,7 @@ final class NuanceItemQuery
 
   private $ids;
   private $phids;
-  private $sourceIDs;
+  private $sourcePHIDs;
 
   public function withIDs(array $ids) {
     $this->ids = $ids;
@@ -17,54 +17,69 @@ final class NuanceItemQuery
     return $this;
   }
 
-  public function withSourceIDs($source_ids) {
-    $this->sourceIDs = $source_ids;
+  public function withSourcePHIDs(array $source_phids) {
+    $this->sourcePHIDs = $source_phids;
     return $this;
   }
 
-
-  protected function loadPage() {
-    $table = new NuanceItem();
-    $conn_r = $table->establishConnection('r');
-
-    $data = queryfx_all(
-      $conn_r,
-      'SELECT FROM %T %Q %Q %Q',
-      $table->getTableName(),
-      $this->buildWhereClause($conn_r),
-      $this->buildOrderClause($conn_r),
-      $this->buildLimitClause($conn_r));
-
-    return $table->loadAllFromArray($data);
+  public function newResultObject() {
+    return new NuanceItem();
   }
 
-  protected function buildWhereClause(AphrontDatabaseConnection $conn_r) {
-    $where = array();
+  protected function loadPage() {
+    return $this->loadStandardPage($this->newResultObject());
+  }
 
-    $where[] = $this->buildPagingClause($conn_r);
+  protected function willFilterPage(array $items) {
+    $source_phids = mpull($items, 'getSourcePHID');
 
-    if ($this->sourceID) {
-      $where[] = qsprintf(
-        $conn_r,
-        'sourceID IN (%Ld)',
-        $this->sourceIDs);
+    // NOTE: We always load sources, even if the viewer can't formally see
+    // them. If they can see the item, they're allowed to be aware of the
+    // source in some sense.
+    $sources = id(new NuanceSourceQuery())
+      ->setViewer(PhabricatorUser::getOmnipotentUser())
+      ->withPHIDs($source_phids)
+      ->execute();
+    $sources = mpull($sources, null, 'getPHID');
+
+    foreach ($items as $key => $item) {
+      $source = idx($sources, $item->getSourcePHID());
+      if (!$source) {
+        $this->didRejectResult($items[$key]);
+        unset($items[$key]);
+        continue;
+      }
+      $item->attachSource($source);
     }
 
-    if ($this->ids) {
+    return $items;
+  }
+
+  protected function buildWhereClauseParts(AphrontDatabaseConnection $conn) {
+    $where = parent::buildWhereClauseParts($conn);
+
+    if ($this->sourcePHIDs !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
+        'sourcePHID IN (%Ls)',
+        $this->sourcePHIDs);
+    }
+
+    if ($this->ids !== null) {
+      $where[] = qsprintf(
+        $conn,
         'id IN (%Ld)',
         $this->ids);
     }
 
-    if ($this->phids) {
+    if ($this->phids !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'phid IN (%Ls)',
         $this->phids);
     }
 
-    return $this->formatWhereClause($where);
+    return $where;
   }
 
 }

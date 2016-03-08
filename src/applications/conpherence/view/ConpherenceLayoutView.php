@@ -60,9 +60,6 @@ final class ConpherenceLayoutView extends AphrontView {
     require_celerity_resource('conpherence-message-pane-css');
     require_celerity_resource('conpherence-widget-pane-css');
 
-    require_celerity_resource('phui-fontkit-css');
-    require_celerity_resource('font-source-sans-pro');
-
     $layout_id = celerity_generate_unique_node_id();
 
     $selected_id = null;
@@ -93,6 +90,11 @@ final class ConpherenceLayoutView extends AphrontView {
         'hasWidgets' => false,
       ));
 
+    $class = null;
+    if (!$this->getUser()->isLoggedIn()) {
+      $class = 'conpherence-logged-out';
+    }
+
     $this->initBehavior(
       'conpherence-widget-pane',
       ConpherenceWidgetConfigConstants::getWidgetPaneBehaviorConfig());
@@ -102,16 +104,11 @@ final class ConpherenceLayoutView extends AphrontView {
       array(
         'id'    => $layout_id,
         'sigil' => 'conpherence-layout',
-        'class' => 'conpherence-layout conpherence-role-'.$this->role,
+        'class' => 'conpherence-layout '.
+                    $class.
+                    ' conpherence-role-'.$this->role,
       ),
       array(
-        javelin_tag(
-          'div',
-          array(
-            'class' => 'phabricator-nav-column-background',
-            'sigil' => 'phabricator-nav-column-background',
-          ),
-          ''),
         javelin_tag(
           'div',
           array(
@@ -147,7 +144,7 @@ final class ConpherenceLayoutView extends AphrontView {
                   array(
                     'class' => 'text',
                   ),
-                  pht('You do not have any messages yet.')),
+                  pht('You are not in any rooms yet.')),
                 javelin_tag(
                   'a',
                   array(
@@ -155,7 +152,7 @@ final class ConpherenceLayoutView extends AphrontView {
                     'class' => 'button grey',
                     'sigil' => 'workflow',
                   ),
-                  pht('Send a Message')),
+                  pht('Create a Room')),
             )),
             javelin_tag(
               'div',
@@ -181,7 +178,7 @@ final class ConpherenceLayoutView extends AphrontView {
             javelin_tag(
               'div',
               array(
-                'class' => 'conpherence-message-pane phui-font-source-sans',
+                'class' => 'conpherence-message-pane',
                 'id' => 'conpherence-message-pane',
                 'sigil' => 'conpherence-message-pane',
               ),

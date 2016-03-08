@@ -6,9 +6,8 @@ final class AlmanacServiceQuery
   private $ids;
   private $phids;
   private $names;
-  private $serviceClasses;
+  private $serviceTypes;
   private $devicePHIDs;
-  private $locked;
   private $namePrefix;
   private $nameSuffix;
 
@@ -29,18 +28,13 @@ final class AlmanacServiceQuery
     return $this;
   }
 
-  public function withServiceClasses(array $classes) {
-    $this->serviceClasses = $classes;
+  public function withServiceTypes(array $types) {
+    $this->serviceTypes = $types;
     return $this;
   }
 
   public function withDevicePHIDs(array $phids) {
     $this->devicePHIDs = $phids;
-    return $this;
-  }
-
-  public function withLocked($locked) {
-    $this->locked = $locked;
     return $this;
   }
 
@@ -54,53 +48,51 @@ final class AlmanacServiceQuery
     return $this;
   }
 
+  public function withNameNgrams($ngrams) {
+    return $this->withNgramsConstraint(
+      new AlmanacServiceNameNgrams(),
+      $ngrams);
+  }
+
   public function needBindings($need_bindings) {
     $this->needBindings = $need_bindings;
     return $this;
   }
 
-  protected function loadPage() {
-    $table = new AlmanacService();
-    $conn_r = $table->establishConnection('r');
-
-    $data = queryfx_all(
-      $conn_r,
-      'SELECT service.* FROM %T service %Q %Q %Q %Q',
-      $table->getTableName(),
-      $this->buildJoinClause($conn_r),
-      $this->buildWhereClause($conn_r),
-      $this->buildOrderClause($conn_r),
-      $this->buildLimitClause($conn_r));
-
-    return $table->loadAllFromArray($data);
+  public function newResultObject() {
+    return new AlmanacService();
   }
 
-  protected function buildJoinClause(AphrontDatabaseConnection $conn_r) {
-    $joins = array();
+  protected function loadPage() {
+    return $this->loadStandardPage($this->newResultObject());
+  }
 
-    if ($this->devicePHIDs !== null) {
+  protected function buildJoinClauseParts(AphrontDatabaseConnection $conn) {
+    $joins = parent::buildJoinClauseParts($conn);
+
+    if ($this->shouldJoinBindingTable()) {
       $joins[] = qsprintf(
-        $conn_r,
+        $conn,
         'JOIN %T binding ON service.phid = binding.servicePHID',
         id(new AlmanacBinding())->getTableName());
     }
 
-    return implode(' ', $joins);
+    return $joins;
   }
 
-  protected function buildWhereClause(AphrontDatabaseConnection $conn_r) {
-    $where = array();
+  protected function buildWhereClauseParts(AphrontDatabaseConnection $conn) {
+    $where = parent::buildWhereClauseParts($conn);
 
     if ($this->ids !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'service.id IN (%Ld)',
         $this->ids);
     }
 
     if ($this->phids !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'service.phid IN (%Ls)',
         $this->phids);
     }
@@ -112,63 +104,56 @@ final class AlmanacServiceQuery
       }
 
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'service.nameIndex IN (%Ls)',
         $hashes);
     }
 
-    if ($this->serviceClasses !== null) {
+    if ($this->serviceTypes !== null) {
       $where[] = qsprintf(
-        $conn_r,
-        'service.serviceClass IN (%Ls)',
-        $this->serviceClasses);
+        $conn,
+        'service.serviceType IN (%Ls)',
+        $this->serviceTypes);
     }
 
     if ($this->devicePHIDs !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'binding.devicePHID IN (%Ls)',
         $this->devicePHIDs);
     }
 
-    if ($this->locked !== null) {
-      $where[] = qsprintf(
-        $conn_r,
-        'service.isLocked = %d',
-        (int)$this->locked);
-    }
-
     if ($this->namePrefix !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'service.name LIKE %>',
         $this->namePrefix);
     }
 
     if ($this->nameSuffix !== null) {
       $where[] = qsprintf(
-        $conn_r,
+        $conn,
         'service.name LIKE %<',
         $this->nameSuffix);
     }
 
-    $where[] = $this->buildPagingClause($conn_r);
-
-    return $this->formatWhereClause($where);
+    return $where;
   }
 
   protected function willFilterPage(array $services) {
-    $service_types = AlmanacServiceType::getAllServiceTypes();
+    $service_map = AlmanacServiceType::getAllServiceTypes();
 
     foreach ($services as $key => $service) {
-      $service_class = $service->getServiceClass();
-      $service_type = idx($service_types, $service_class);
-      if (!$service_type) {
+      $implementation = idx($service_map, $service->getServiceType());
+
+      if (!$implementation) {
         $this->didRejectResult($service);
         unset($services[$key]);
         continue;
       }
-      $service->attachServiceType($service_type);
+
+      $implementation = clone $implementation;
+      $service->attachServiceImplementation($implementation);
     }
 
     return $services;
@@ -180,6 +165,7 @@ final class AlmanacServiceQuery
       $bindings = id(new AlmanacBindingQuery())
         ->setViewer($this->getViewer())
         ->withServicePHIDs($service_phids)
+        ->needProperties($this->getNeedProperties())
         ->execute();
       $bindings = mgroup($bindings, 'getServicePHID');
 
@@ -192,10 +178,26 @@ final class AlmanacServiceQuery
     return parent::didFilterPage($services);
   }
 
+  private function shouldJoinBindingTable() {
+    return ($this->devicePHIDs !== null);
+  }
+
+  protected function shouldGroupQueryResultRows() {
+    if ($this->shouldJoinBindingTable()) {
+      return true;
+    }
+
+    return parent::shouldGroupQueryResultRows();
+  }
+
+  protected function getPrimaryTableAlias() {
+    return 'service';
+  }
+
   public function getOrderableColumns() {
     return parent::getOrderableColumns() + array(
       'name' => array(
-        'table' => 'service',
+        'table' => $this->getPrimaryTableAlias(),
         'column' => 'name',
         'type' => 'string',
         'unique' => true,
@@ -204,11 +206,11 @@ final class AlmanacServiceQuery
     );
   }
 
-  protected function getValueMap($cursor, array $keys) {
+  protected function getPagingValueMap($cursor, array $keys) {
     $service = $this->loadCursorObject($cursor);
     return array(
       'id' => $service->getID(),
-      'name' => $service->getServiceName(),
+      'name' => $service->getName(),
     );
   }
 

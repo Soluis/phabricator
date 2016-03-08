@@ -1,18 +1,46 @@
 <?php
 
 /**
- * @task  status  Method Status
- * @task  pager   Paging Results
+ * @task info Method Information
+ * @task status Method Status
+ * @task pager Paging Results
  */
 abstract class ConduitAPIMethod
   extends Phobject
   implements PhabricatorPolicyInterface {
 
+  private $viewer;
+
   const METHOD_STATUS_STABLE      = 'stable';
   const METHOD_STATUS_UNSTABLE    = 'unstable';
   const METHOD_STATUS_DEPRECATED  = 'deprecated';
 
+
+  /**
+   * Get a short, human-readable text summary of the method.
+   *
+   * @return string Short summary of method.
+   * @task info
+   */
+  public function getMethodSummary() {
+    return $this->getMethodDescription();
+  }
+
+
+  /**
+   * Get a detailed description of the method.
+   *
+   * This method should return remarkup.
+   *
+   * @return string Detailed description of the method.
+   * @task info
+   */
   abstract public function getMethodDescription();
+
+  public function getMethodDocumentation() {
+    return null;
+  }
+
   abstract protected function defineParamTypes();
   abstract protected function defineReturnType();
 
@@ -23,14 +51,12 @@ abstract class ConduitAPIMethod
   abstract protected function execute(ConduitAPIRequest $request);
 
 
-  public function __construct() {}
-
   public function getParamTypes() {
     $types = $this->defineParamTypes();
 
     $query = $this->newQueryObject();
     if ($query) {
-      $types['order'] = 'order';
+      $types['order'] = 'optional order';
       $types += $this->getPagerParamTypes();
     }
 
@@ -87,10 +113,12 @@ abstract class ConduitAPIMethod
   }
 
   public function executeMethod(ConduitAPIRequest $request) {
+    $this->setViewer($request->getUser());
+
     return $this->execute($request);
   }
 
-  public abstract function getAPIMethodName();
+  abstract public function getAPIMethodName();
 
   /**
    * Return a key which sorts methods by application name, then method status,
@@ -111,38 +139,29 @@ abstract class ConduitAPIMethod
     return "{$head}.{$ord}.{$tail}";
   }
 
+  public static function getMethodStatusMap() {
+    $map = array(
+      self::METHOD_STATUS_STABLE => pht('Stable'),
+      self::METHOD_STATUS_UNSTABLE => pht('Unstable'),
+      self::METHOD_STATUS_DEPRECATED => pht('Deprecated'),
+    );
+
+    return $map;
+  }
+
   public function getApplicationName() {
     return head(explode('.', $this->getAPIMethodName(), 2));
   }
 
+  public static function loadAllConduitMethods() {
+    return id(new PhutilClassMapQuery())
+      ->setAncestorClass(__CLASS__)
+      ->setUniqueMethod('getAPIMethodName')
+      ->execute();
+  }
+
   public static function getConduitMethod($method_name) {
-    static $method_map = null;
-
-    if ($method_map === null) {
-      $methods = id(new PhutilSymbolLoader())
-        ->setAncestorClass(__CLASS__)
-        ->loadObjects();
-
-      foreach ($methods as $method) {
-        $name = $method->getAPIMethodName();
-
-        if (empty($method_map[$name])) {
-          $method_map[$name] = $method;
-          continue;
-        }
-
-        $orig_class = get_class($method_map[$name]);
-        $this_class = get_class($method);
-        throw new Exception(
-          pht(
-            'Two Conduit API method classes (%s, %s) both have the same '.
-            'method name (%s). API methods must have unique method names.',
-            $orig_class,
-            $this_class,
-            $name));
-      }
-    }
-
+    $method_map = self::loadAllConduitMethods();
     return idx($method_map, $method_name);
   }
 
@@ -205,6 +224,15 @@ abstract class ConduitAPIMethod
     }
 
     return null;
+  }
+
+  final public function setViewer(PhabricatorUser $viewer) {
+    $this->viewer = $viewer;
+    return $this;
+  }
+
+  final public function getViewer() {
+    return $this->viewer;
   }
 
 /* -(  Paging Results  )----------------------------------------------------- */

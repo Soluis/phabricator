@@ -1,6 +1,6 @@
 <?php
 
-final class PhabricatorJumpNavHandler {
+final class PhabricatorJumpNavHandler extends Phobject {
 
   public static function getJumpResponse(PhabricatorUser $viewer, $jump) {
     $jump = trim($jump);
@@ -15,7 +15,6 @@ final class PhabricatorJumpNavHandler {
       '/^u$/i' => 'uri:/people/',
       '/^p\s+(.+)$/i' => 'project',
       '/^u\s+(\S+)$/i' => 'user',
-      '/^task:\s*(.+)/i' => 'create-task',
       '/^(?:s)\s+(\S+)/i' => 'find-symbol',
       '/^r\s+(.+)$/i' => 'find-repository',
     );
@@ -58,16 +57,12 @@ final class PhabricatorJumpNavHandler {
                 ->execute();
               if (count($repositories) == 1) {
                 // Just one match, jump to repository.
-                $uri = '/diffusion/'.head($repositories)->getCallsign().'/';
+                $uri = head($repositories)->getURI();
               } else {
                 // More than one match, jump to search.
                 $uri = urisprintf('/diffusion/?order=name&name=%s', $name);
               }
               return id(new AphrontRedirectResponse())->setURI($uri);
-            case 'create-task':
-              return id(new AphrontRedirectResponse())
-                ->setURI('/maniphest/task/create/?title='
-                  .phutil_escape_uri($matches[1]));
             default:
               throw new Exception(pht("Unknown jump effect '%s'!", $effect));
           }

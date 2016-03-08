@@ -54,6 +54,10 @@ final class PHUIFeedStoryView extends AphrontView {
     return $this;
   }
 
+  public function getImage() {
+    return $this->image;
+  }
+
   public function setImageHref($image_href) {
     $this->imageHref = $image_href;
     return $this;
@@ -153,27 +157,23 @@ final class PHUIFeedStoryView extends AphrontView {
   public function render() {
 
     require_celerity_resource('phui-feed-story-css');
-    Javelin::initBehavior('phabricator-hovercards');
+    Javelin::initBehavior('phui-hovercards');
 
     $body = null;
     $foot = null;
-    $image_style = null;
-    $actor = '';
 
-    if ($this->image) {
-      $actor = new PHUIIconView();
-      $actor->setImage($this->image);
-      $actor->addClass('phui-feed-story-actor-image');
-      if ($this->imageHref) {
-        $actor->setHref($this->imageHref);
-      }
+    $actor = new PHUIIconView();
+    $actor->setImage($this->image);
+    $actor->addClass('phui-feed-story-actor-image');
+    if ($this->imageHref) {
+      $actor->setHref($this->imageHref);
     }
 
     if ($this->epoch) {
       // TODO: This is really bad; when rendering through Conduit and via
       // renderText() we don't have a user.
-      if ($this->user) {
-        $foot = phabricator_datetime($this->epoch, $this->user);
+      if ($this->hasViewer()) {
+        $foot = phabricator_datetime($this->epoch, $this->getViewer());
       } else {
         $foot = null;
       }
@@ -193,7 +193,7 @@ final class PHUIFeedStoryView extends AphrontView {
     $icon = null;
     if ($this->appIcon) {
       $icon = id(new PHUIIconView())
-        ->setIconFont($this->appIcon);
+        ->setIcon($this->appIcon);
     }
 
     $action_list = array();

@@ -18,7 +18,7 @@ final class PhabricatorDaemonsApplication extends PhabricatorApplication {
     return "\xE2\x98\xAF";
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-pied-piper-alt';
   }
 
@@ -46,6 +46,15 @@ final class PhabricatorDaemonsApplication extends PhabricatorApplication {
           '(?P<id>[1-9]\d*)/' => 'PhabricatorDaemonLogViewController',
         ),
         'event/(?P<id>[1-9]\d*)/' => 'PhabricatorDaemonLogEventViewController',
+        'bulk/' => array(
+          '(?:query/(?P<queryKey>[^/]+)/)?' =>
+            'PhabricatorDaemonBulkJobListController',
+          'monitor/(?P<id>\d+)/' =>
+            'PhabricatorDaemonBulkJobMonitorController',
+          'view/(?P<id>\d+)/' =>
+            'PhabricatorDaemonBulkJobViewController',
+
+        ),
       ),
     );
   }

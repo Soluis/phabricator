@@ -21,7 +21,7 @@ final class PHUIButtonView extends AphrontTagView {
   private $tag = 'button';
   private $dropdown;
   private $icon;
-  private $iconFont;
+  private $iconFirst;
   private $href = null;
   private $title = null;
   private $disabled;
@@ -87,15 +87,13 @@ final class PHUIButtonView extends AphrontTagView {
     return $this;
   }
 
-  public function setIcon(PHUIIconView $icon) {
+  public function setIcon($icon, $first = true) {
+    if (!($icon instanceof PHUIIconView)) {
+      $icon = id(new PHUIIconView())
+        ->setIcon($icon);
+    }
     $this->icon = $icon;
-    return $this;
-  }
-
-  public function setIconFont($icon) {
-    $icon = id(new PHUIIconView())
-      ->setIconFont($icon);
-    $this->setIcon($icon);
+    $this->iconFirst = $first;
     return $this;
   }
 
@@ -136,6 +134,10 @@ final class PHUIButtonView extends AphrontTagView {
 
     if ($this->icon) {
       $classes[] = 'has-icon';
+    }
+
+    if ($this->iconFirst == false) {
+      $classes[] = 'icon-last';
     }
 
     if ($this->disabled) {
@@ -184,6 +186,10 @@ final class PHUIButtonView extends AphrontTagView {
       $caret = phutil_tag('span', array('class' => 'caret'), '');
     }
 
-    return array($icon, $text, $caret);
+    if ($this->iconFirst == true) {
+      return array($icon, $text, $caret);
+    } else {
+      return array($text, $icon);
+    }
   }
 }

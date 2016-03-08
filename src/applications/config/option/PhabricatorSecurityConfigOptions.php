@@ -11,7 +11,7 @@ final class PhabricatorSecurityConfigOptions
     return pht('Security options.');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-lock';
   }
 
@@ -20,8 +20,6 @@ final class PhabricatorSecurityConfigOptions
   }
 
   public function getOptions() {
-    $support_href = PhabricatorEnv::getDoclink('Give Feedback! Get Support!');
-
     $doc_href = PhabricatorEnv::getDoclink('Configuring a File Domain');
     $doc_name = pht('Configuration Guide: Configuring a File Domain');
 
@@ -197,11 +195,8 @@ final class PhabricatorSecurityConfigOptions
         ->setSummary(pht('Whitelists editor protocols for "Open in Editor".'))
         ->setDescription(
           pht(
-            "Users can configure a URI pattern to open files in a text ".
-            "editor. The URI must use a protocol on this whitelist.\n\n".
-            "(If you use an editor which defines a protocol not on this ".
-            "list, [[ %s | let us know ]] and we'll update the defaults.)",
-            $support_href))
+            'Users can configure a URI pattern to open files in a text '.
+            'editor. The URI must use a protocol on this whitelist.'))
         ->setLocked(true),
        $this->newOption(
          'celerity.resource-hash',
@@ -278,22 +273,6 @@ final class PhabricatorSecurityConfigOptions
               'unsecured content over plain HTTP. It is very difficult to '.
               'undo this change once users\' browsers have accepted the '.
               'setting.')),
-        $this->newOption('security.allow-conduit-act-as-user', 'bool', false)
-          ->setBoolOptions(
-            array(
-              pht('Allow'),
-              pht('Disallow'),
-            ))
-          ->setLocked(true)
-          ->setSummary(
-            pht('Allow administrators to use the Conduit API as other users.'))
-          ->setDescription(
-            pht(
-              'DEPRECATED - if you enable this, you are allowing '.
-              'administrators to act as any user via the Conduit API. '.
-              'Enabling this is not advised as it introduces a huge policy '.
-              'violation and has been obsoleted in functionality.')),
-
     );
   }
 

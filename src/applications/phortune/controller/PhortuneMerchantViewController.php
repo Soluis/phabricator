@@ -3,19 +3,13 @@
 final class PhortuneMerchantViewController
   extends PhortuneMerchantController {
 
-  private $id;
-
-  public function willProcessRequest(array $data) {
-    $this->id = $data['id'];
-  }
-
-  public function processRequest() {
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $request->getViewer();
+    $id = $request->getURIData('id');
 
     $merchant = id(new PhortuneMerchantQuery())
       ->setViewer($viewer)
-      ->withIDs(array($this->id))
+      ->withIDs(array($id))
       ->executeOne();
     if (!$merchant) {
       return new Aphront404Response();
@@ -30,7 +24,6 @@ final class PhortuneMerchantViewController
       $merchant->getName());
 
     $header = id(new PHUIHeaderView())
-      ->setObjectName(pht('Merchant %d', $merchant->getID()))
       ->setHeader($merchant->getName())
       ->setUser($viewer)
       ->setPolicyObject($merchant);
@@ -50,7 +43,7 @@ final class PhortuneMerchantViewController
 
     $box = id(new PHUIObjectBoxView())
       ->setHeader($header)
-      ->appendChild($properties);
+      ->addPropertyList($properties);
 
     $timeline = $this->buildTransactionTimeline(
       $merchant,
@@ -143,12 +136,9 @@ final class PhortuneMerchantViewController
 
     $description = $merchant->getDescription();
     if (strlen($description)) {
-      $description = PhabricatorMarkupEngine::renderOneObject(
-        id(new PhabricatorMarkupOneOff())->setContent($description),
-        'default',
-        $viewer);
-
-      $view->addSectionHeader(pht('Description'));
+      $description = new PHUIRemarkupView($viewer, $description);
+      $view->addSectionHeader(
+        pht('Description'), PHUIPropertyListView::ICON_SUMMARY);
       $view->addTextContent($description);
     }
 
@@ -229,9 +219,9 @@ final class PhortuneMerchantViewController
 
       if ($provider->isEnabled()) {
         if ($provider->isAcceptingLivePayments()) {
-          $item->setBarColor('green');
+          $item->setStatusIcon('fa-check green');
         } else {
-          $item->setBarColor('yellow');
+          $item->setStatusIcon('fa-warning yellow');
           $item->addIcon('fa-exclamation-triangle', pht('Test Mode'));
         }
 
@@ -285,7 +275,7 @@ final class PhortuneMerchantViewController
       ->setText(pht('Add Payment Provider'))
       ->setDisabled(!$can_edit)
       ->setWorkflow(!$can_edit)
-      ->setIcon(id(new PHUIIconView())->setIconFont('fa-plus'));
+      ->setIcon('fa-plus');
 
     $header = id(new PHUIHeaderView())
       ->setHeader(pht('Payment Providers'))
@@ -293,7 +283,7 @@ final class PhortuneMerchantViewController
 
     return id(new PHUIObjectBoxView())
       ->setHeader($header)
-      ->appendChild($provider_list);
+      ->setObjectList($provider_list);
   }
 
 

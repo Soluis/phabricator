@@ -2,9 +2,8 @@
 
 final class HeraldNewController extends HeraldController {
 
-  public function processRequest() {
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $request->getViewer();
 
     $content_type_map = HeraldAdapter::getEnabledAdapterMap($viewer);
     $rule_type_map = HeraldRuleTypeConfig::getRuleTypeMap();
@@ -207,13 +206,14 @@ final class HeraldNewController extends HeraldController {
       ->buildApplicationCrumbs()
       ->addTextCrumb(pht('Create Rule'));
 
-    return $this->buildApplicationPage(
-      array(
-        $crumbs,
-        $form_box,
-      ),
-      array(
-        'title' => pht('Create Herald Rule'),
+    $title = pht('Create Herald Rule');
+
+    return $this->newPage()
+      ->setTitle($title)
+      ->setCrumbs($crumbs)
+      ->appendChild(
+        array(
+          $form_box,
       ));
   }
 

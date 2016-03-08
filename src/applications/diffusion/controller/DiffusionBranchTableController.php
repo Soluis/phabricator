@@ -6,23 +6,32 @@ final class DiffusionBranchTableController extends DiffusionController {
     return true;
   }
 
-  protected function processDiffusionRequest(AphrontRequest $request) {
-    $drequest = $this->getDiffusionRequest();
-    $viewer = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $response = $this->loadDiffusionContext();
+    if ($response) {
+      return $response;
+    }
 
+    $viewer = $this->getViewer();
+    $drequest = $this->getDiffusionRequest();
     $repository = $drequest->getRepository();
 
-    $pager = new AphrontPagerView();
-    $pager->setURI($request->getRequestURI(), 'offset');
-    $pager->setOffset($request->getInt('offset'));
+    $pager = id(new PHUIPagerView())
+      ->readFromRequest($request);
 
-    // TODO: Add support for branches that contain commit
+    $params = array(
+      'offset' => $pager->getOffset(),
+      'limit' => $pager->getPageSize() + 1,
+    );
+
+    $contains = $drequest->getSymbolicCommit();
+    if (strlen($contains)) {
+      $params['contains'] = $contains;
+    }
+
     $branches = $this->callConduitWithDiffusionRequest(
       'diffusion.branchquery',
-      array(
-        'offset' => $pager->getOffset(),
-        'limit' => $pager->getPageSize() + 1,
-      ));
+      $params);
     $branches = $pager->sliceResults($branches);
 
     $branches = DiffusionRepositoryRef::loadAllFromDictionaries($branches);
@@ -47,7 +56,7 @@ final class DiffusionBranchTableController extends DiffusionController {
 
       $panel = id(new PHUIObjectBoxView())
         ->setHeaderText(pht('Branches'))
-        ->appendChild($view);
+        ->setTable($view);
 
       $content = $panel;
     }
@@ -57,18 +66,20 @@ final class DiffusionBranchTableController extends DiffusionController {
         'branches' => true,
       ));
 
-    return $this->buildApplicationPage(
-      array(
-        $crumbs,
-        $content,
-        $pager,
-      ),
-      array(
-        'title' => array(
+    $pager_box = $this->renderTablePagerBox($pager);
+
+    return $this->newPage()
+      ->setTitle(
+        array(
           pht('Branches'),
-          'r'.$repository->getCallsign(),
-        ),
-      ));
+          $repository->getDisplayName(),
+        ))
+      ->setCrumbs($crumbs)
+      ->appendChild(
+        array(
+          $content,
+          $pager_box,
+        ));
   }
 
 }

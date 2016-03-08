@@ -1,6 +1,6 @@
 <?php
 
-final class DifferentialChangeType {
+final class DifferentialChangeType extends Phobject {
 
   const TYPE_ADD        = 1;
   const TYPE_CHANGE     = 2;
@@ -38,6 +38,22 @@ final class DifferentialChangeType {
     return idx($types, coalesce($type, '?'), '~');
   }
 
+  public static function getSummaryColorForChangeType($type) {
+    static $types = array(
+      self::TYPE_ADD        => 'green',
+      self::TYPE_CHANGE     => 'black',
+      self::TYPE_DELETE     => 'red',
+      self::TYPE_MOVE_AWAY  => 'orange',
+      self::TYPE_COPY_AWAY  => 'black',
+      self::TYPE_MOVE_HERE  => 'green',
+      self::TYPE_COPY_HERE  => 'green',
+      self::TYPE_MULTICOPY  => 'orange',
+      self::TYPE_MESSAGE    => 'black',
+      self::TYPE_CHILD      => 'black',
+    );
+    return idx($types, coalesce($type, '?'), 'black');
+  }
+
   public static function getShortNameForFileType($type) {
     static $names = array(
       self::FILE_TEXT       => null,
@@ -48,6 +64,21 @@ final class DifferentialChangeType {
       self::FILE_SUBMODULE  => 'sub',
     );
     return idx($names, coalesce($type, '?'), '???');
+  }
+
+  public static function getIconForFileType($type) {
+    static $icons = array(
+      self::FILE_TEXT => 'fa-file-text-o',
+      self::FILE_IMAGE => 'fa-file-image-o',
+      self::FILE_BINARY => 'fa-file',
+      self::FILE_DIRECTORY => 'fa-folder-open',
+      self::FILE_SYMLINK => 'fa-link',
+      self::FILE_DELETED => 'fa-file',
+      self::FILE_NORMAL => 'fa-file-text-o',
+      self::FILE_SUBMODULE => 'fa-folder-open-o',
+    );
+
+    return idx($icons, $type, 'fa-file');
   }
 
   public static function isOldLocationChangeType($type) {

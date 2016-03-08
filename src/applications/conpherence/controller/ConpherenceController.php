@@ -16,7 +16,7 @@ abstract class ConpherenceController extends PhabricatorController {
     $nav = new PHUIListView();
 
     $nav->newLink(
-      pht('New Message'),
+      pht('New Room'),
       $this->getApplicationURI('new/'));
 
     $nav->addMenuItem(
@@ -27,14 +27,6 @@ abstract class ConpherenceController extends PhabricatorController {
       ->addSigil('conpherence-widget-adder')
       ->setMetadata(array('widget' => 'widgets-people')));
 
-    $nav->addMenuItem(
-      id(new PHUIListItemView())
-      ->setName(pht('New Calendar Item'))
-      ->setType(PHUIListItemView::TYPE_LINK)
-      ->setHref('/calendar/event/create/')
-      ->addSigil('conpherence-widget-adder')
-      ->setMetadata(array('widget' => 'widgets-calendar')));
-
     return $nav;
   }
 
@@ -44,27 +36,26 @@ abstract class ConpherenceController extends PhabricatorController {
 
   protected function buildConpherenceApplicationCrumbs($is_rooms = false) {
     $crumbs = parent::buildApplicationCrumbs();
-    $crumbs->setBorder(true);
 
     if ($is_rooms) {
       $crumbs
         ->addAction(
           id(new PHUIListItemView())
           ->setName(pht('New Room'))
-          ->setHref($this->getApplicationURI('room/new/'))
+          ->setHref($this->getApplicationURI('new/'))
           ->setIcon('fa-plus-square')
           ->setWorkflow(true));
     } else {
       $crumbs
         ->addAction(
           id(new PHUIListItemView())
-          ->setName(pht('New Message'))
+          ->setName(pht('New Room'))
           ->setHref($this->getApplicationURI('new/'))
           ->setIcon('fa-plus-square')
           ->setWorkflow(true))
         ->addAction(
           id(new PHUIListItemView())
-          ->setName(pht('Thread'))
+          ->setName(pht('Room'))
           ->setHref('#')
           ->setIcon('fa-bars')
           ->setStyle('display: none;')
@@ -81,17 +72,10 @@ abstract class ConpherenceController extends PhabricatorController {
 
     $crumbs = $this->buildApplicationCrumbs();
     $data = $conpherence->getDisplayData($this->getViewer());
-    if ($conpherence->getID() && $conpherence->getIsRoom()) {
-      $icon = $conpherence->getPolicyIconName($policy_objects);
-    } else {
-      $icon = null;
-    }
     $crumbs->addCrumb(
       id(new PHUICrumbView())
-      ->setIcon($icon)
       ->setName($data['title'])
-      ->setHref($this->getApplicationURI('update/'.$conpherence->getID().'/'))
-      ->setWorkflow(true));
+      ->setHref('/'.$conpherence->getMonogram()));
 
     return hsprintf(
       '%s',

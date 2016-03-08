@@ -3,7 +3,7 @@
 /**
  * @task addmethod  Adding Payment Methods
  */
-abstract class PhortunePaymentProvider {
+abstract class PhortunePaymentProvider extends Phobject {
 
   private $providerConfig;
 
@@ -109,7 +109,7 @@ abstract class PhortunePaymentProvider {
   abstract public function canRunConfigurationTest();
 
   public function runConfigurationTest() {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -117,9 +117,9 @@ abstract class PhortunePaymentProvider {
 
 
   public static function getAllProviders() {
-    return id(new PhutilSymbolLoader())
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass(__CLASS__)
-      ->loadObjects();
+      ->execute();
   }
 
   public function isEnabled() {
@@ -169,7 +169,7 @@ abstract class PhortunePaymentProvider {
    * @task addmethod
    */
   public function translateCreatePaymentMethodErrorCode($error_code) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -177,7 +177,7 @@ abstract class PhortunePaymentProvider {
    * @task addmethod
    */
   public function getCreatePaymentMethodErrorMessage($error_code) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -185,7 +185,7 @@ abstract class PhortunePaymentProvider {
    * @task addmethod
    */
   public function validateCreatePaymentMethodToken(array $token) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -196,7 +196,7 @@ abstract class PhortunePaymentProvider {
     AphrontRequest $request,
     PhortunePaymentMethod $method,
     array $token) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -206,12 +206,12 @@ abstract class PhortunePaymentProvider {
   public function renderCreatePaymentMethodForm(
     AphrontRequest $request,
     array $errors) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
   public function getDefaultPaymentMethodDisplayName(
     PhortunePaymentMethod $method) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 
@@ -290,7 +290,7 @@ abstract class PhortunePaymentProvider {
   public function processControllerRequest(
     PhortuneProviderActionController $controller,
     AphrontRequest $request) {
-    throw new PhortuneNotImplementedException($this);
+    throw new PhutilMethodNotImplementedException();
   }
 
 }

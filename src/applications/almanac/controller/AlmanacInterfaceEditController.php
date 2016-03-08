@@ -132,7 +132,7 @@ final class AlmanacInterfaceEditController
     $box = id(new PHUIObjectBoxView())
       ->setValidationException($validation_exception)
       ->setHeaderText($title)
-      ->appendChild($form);
+      ->setForm($form);
 
     $crumbs = $this->buildApplicationCrumbs();
     $crumbs->addTextCrumb($device->getName(), $device_uri);
@@ -142,13 +142,12 @@ final class AlmanacInterfaceEditController
       $crumbs->addTextCrumb(pht('Edit Interface'));
     }
 
-    return $this->buildApplicationPage(
-      array(
-        $crumbs,
-        $box,
-      ),
-      array(
-        'title' => $title,
+    return $this->newPage()
+      ->setTitle($title)
+      ->setCrumbs($crumbs)
+      ->appendChild(
+        array(
+          $box,
       ));
   }
 

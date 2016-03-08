@@ -104,7 +104,6 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
       $revision_panel = null;
     }
 
-    require_celerity_resource('homepage-panel-css');
     $home = phutil_tag(
       'div',
       array(
@@ -153,7 +152,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     $title = pht('Unbreak Now!');
     $panel = new PHUIObjectBoxView();
     $panel->setHeader($this->renderSectionHeader($title, $href));
-    $panel->appendChild($this->buildTaskListView($tasks));
+    $panel->setObjectList($this->buildTaskListView($tasks));
 
     return $panel;
   }
@@ -191,7 +190,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     if (!$tasks) {
       return $this->renderMiniPanel(
         pht('No "Needs Triage" Tasks'),
-        pht('No tasks in projects you are a member of need triage.'));
+        pht('No tasks tagged with projects you are a member of need triage.'));
     }
 
     $title = pht('Needs Triage');
@@ -201,7 +200,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
       $user->getPHID());
     $panel = new PHUIObjectBoxView();
     $panel->setHeader($this->renderSectionHeader($title, $href));
-    $panel->appendChild($this->buildTaskListView($tasks));
+    $panel->setObjectList($this->buildTaskListView($tasks));
 
     return $panel;
   }
@@ -220,7 +219,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
 
     $revisions = $revision_query->execute();
 
-    list($blocking, $active, ) = DifferentialRevisionQuery::splitResponsible(
+    list($blocking, $active) = DifferentialRevisionQuery::splitResponsible(
         $revisions,
         array($user_phid));
 
@@ -247,9 +246,8 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     $revision_view->setHandles($handles);
 
     $list_view = $revision_view->render();
-    $list_view->setFlush(true);
 
-    $panel->appendChild($list_view);
+    $panel->setObjectList($list_view);
 
     return $panel;
   }
@@ -289,7 +287,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     $href = '/maniphest/query/assigned/';
     $panel = new PHUIObjectBoxView();
     $panel->setHeader($this->renderSectionHeader($title, $href));
-    $panel->appendChild($this->buildTaskListView($tasks));
+    $panel->setObjectList($this->buildTaskListView($tasks));
 
     return $panel;
   }
@@ -319,8 +317,12 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
         'href' => $href,
       ),
       $title);
+    $icon = id(new PHUIIconView())
+      ->setIcon('fa-search')
+      ->setHref($href);
     $header = id(new PHUIHeaderView())
-      ->setHeader($title);
+      ->setHeader($title)
+      ->addActionItem($icon);
     return $header;
   }
 
@@ -347,9 +349,8 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
 
     $query = id(new DiffusionCommitQuery())
       ->setViewer($user)
-      ->withAuditorPHIDs($phids)
+      ->withNeedsAuditByPHIDs($phids)
       ->withAuditStatus(DiffusionCommitQuery::AUDIT_STATUS_OPEN)
-      ->withAuditAwaitingUser($user)
       ->needAuditRequests(true)
       ->needCommitData(true)
       ->setLimit(10);
@@ -374,7 +375,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     $href = '/audit/';
     $panel = new PHUIObjectBoxView();
     $panel->setHeader($this->renderSectionHeader($title, $href));
-    $panel->appendChild($view);
+    $panel->setObjectList($view);
 
     return $panel;
   }
@@ -413,7 +414,7 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
     $href = '/audit/';
     $panel = new PHUIObjectBoxView();
     $panel->setHeader($this->renderSectionHeader($title, $href));
-    $panel->appendChild($view);
+    $panel->setObjectList($view);
 
     return $panel;
   }

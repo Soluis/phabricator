@@ -36,15 +36,14 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
   }
 
   public function render() {
-
     $this->requireResource('differential-core-view-css');
     $this->requireResource('differential-revision-history-css');
 
     $data = array(
       array(
-        'name' => 'Base',
+        'name' => pht('Base'),
         'id'   => null,
-        'desc' => 'Base',
+        'desc' => pht('Base'),
         'age'  => null,
         'obj'  => null,
       ),
@@ -53,7 +52,7 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
     $seq = 0;
     foreach ($this->diffs as $diff) {
       $data[] = array(
-        'name' => 'Diff '.(++$seq),
+        'name' => pht('Diff %d', ++$seq),
         'id'   => $diff->getID(),
         'desc' => $diff->getDescription(),
         'age'  => $diff->getDateCreated(),
@@ -307,7 +306,7 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
     return id(new PHUIObjectBoxView())
       ->setHeaderText(pht('Revision Update History'))
       ->setFlush(true)
-      ->appendChild($content);
+      ->setTable($content);
   }
 
   const STAR_NONE = 'none';
@@ -324,7 +323,6 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
       DifferentialLintStatus::LINT_FAIL => self::STAR_FAIL,
       DifferentialLintStatus::LINT_SKIP => self::STAR_SKIP,
       DifferentialLintStatus::LINT_AUTO_SKIP => self::STAR_SKIP,
-      DifferentialLintStatus::LINT_POSTPONED => self::STAR_SKIP,
     );
 
     $star = idx($map, $diff->getLintStatus(), self::STAR_FAIL);
@@ -340,7 +338,6 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
       DifferentialUnitStatus::UNIT_FAIL => self::STAR_FAIL,
       DifferentialUnitStatus::UNIT_SKIP => self::STAR_SKIP,
       DifferentialUnitStatus::UNIT_AUTO_SKIP => self::STAR_SKIP,
-      DifferentialUnitStatus::UNIT_POSTPONED => self::STAR_SKIP,
     );
 
     $star = idx($map, $diff->getUnitStatus(), self::STAR_FAIL);
@@ -362,8 +359,6 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
         return pht('Lint Skipped');
       case DifferentialLintStatus::LINT_AUTO_SKIP:
         return pht('Automatic diff as part of commit; lint not applicable.');
-      case DifferentialLintStatus::LINT_POSTPONED:
-        return pht('Lint Postponed');
     }
     return pht('Unknown');
   }
@@ -383,8 +378,6 @@ final class DifferentialRevisionUpdateHistoryView extends AphrontView {
       case DifferentialUnitStatus::UNIT_AUTO_SKIP:
         return pht(
           'Automatic diff as part of commit; unit tests not applicable.');
-      case DifferentialUnitStatus::UNIT_POSTPONED:
-        return pht('Unit Tests Postponed');
     }
     return pht('Unknown');
   }

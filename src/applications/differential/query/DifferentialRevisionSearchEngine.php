@@ -11,6 +11,13 @@ final class DifferentialRevisionSearchEngine
     return 'PhabricatorDifferentialApplication';
   }
 
+  public function newQuery() {
+    return id(new DifferentialRevisionQuery())
+      ->needFlags(true)
+      ->needDrafts(true)
+      ->needRelationships(true);
+  }
+
   public function getPageSize(PhabricatorSavedQuery $saved) {
     if ($saved->getQueryKey() == 'active') {
       return 0xFFFF;
@@ -323,10 +330,35 @@ final class DifferentialRevisionSearchEngine
     if (count($views) == 1) {
       // Reduce this to a PHUIObjectItemListView so we can get the free
       // support from ApplicationSearch.
-      return head($views)->render();
+      $list = head($views)->render();
     } else {
-      return $views;
+      $list = $views;
     }
+
+    $result = new PhabricatorApplicationSearchResultView();
+    $result->setContent($list);
+
+    return $result;
+  }
+
+  protected function getNewUserBody() {
+    $create_button = id(new PHUIButtonView())
+      ->setTag('a')
+      ->setText(pht('Create a Diff'))
+      ->setHref('/differential/diff/create/')
+      ->setColor(PHUIButtonView::GREEN);
+
+    $icon = $this->getApplication()->getIcon();
+    $app_name =  $this->getApplication()->getName();
+    $view = id(new PHUIBigInfoView())
+      ->setIcon($icon)
+      ->setTitle(pht('Welcome to %s', $app_name))
+      ->setDescription(
+        pht('Pre-commit code review. Revisions that are waiting on your input '.
+            'will appear here.'))
+      ->addAction($create_button);
+
+      return $view;
   }
 
 }

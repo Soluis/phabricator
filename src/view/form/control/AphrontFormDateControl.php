@@ -5,9 +5,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
   private $initialTime;
   private $zone;
 
-  private $valueDay;
-  private $valueMonth;
-  private $valueYear;
+  private $valueDate;
   private $valueTime;
   private $allowNull;
   private $continueOnInvalidDate = false;
@@ -22,6 +20,11 @@ final class AphrontFormDateControl extends AphrontFormControl {
 
   public function setIsTimeDisabled($is_disabled) {
     $this->isTimeDisabled = $is_disabled;
+    return $this;
+  }
+
+  public function setIsDisabled($is_datepicker_disabled) {
+    $this->isDisabled = $is_datepicker_disabled;
     return $this;
   }
 
@@ -41,9 +44,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
   }
 
   public function readValueFromRequest(AphrontRequest $request) {
-    $day = $request->getInt($this->getDayInputName());
-    $month = $request->getInt($this->getMonthInputName());
-    $year = $request->getInt($this->getYearInputName());
+    $date = $request->getStr($this->getDateInputName());
     $time = $request->getStr($this->getTimeInputName());
     $enabled = $request->getBool($this->getCheckboxInputName());
 
@@ -55,20 +56,18 @@ final class AphrontFormDateControl extends AphrontFormControl {
 
     $err = $this->getError();
 
-    if ($day || $month || $year || $time) {
-      $this->valueDay = $day;
-      $this->valueMonth = $month;
-      $this->valueYear = $year;
+    if ($date || $time) {
+      $this->valueDate = $date;
       $this->valueTime = $time;
 
       // Assume invalid.
-      $err = 'Invalid';
+      $err = pht('Invalid');
 
       $zone = $this->getTimezone();
 
       try {
-        $date = new DateTime("{$year}-{$month}-{$day} {$time}", $zone);
-        $value = $date->format('U');
+        $datetime = new DateTime("{$date} {$time}", $zone);
+        $value = $datetime->format('U');
       } catch (Exception $ex) {
         $value = null;
       }
@@ -100,9 +99,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
   public function setValue($epoch) {
     if ($epoch instanceof AphrontFormDateControlValue) {
       $this->continueOnInvalidDate = true;
-      $this->valueYear  = $epoch->getValueYear();
-      $this->valueMonth = $epoch->getValueMonth();
-      $this->valueDay   = $epoch->getValueDay();
+      $this->valueDate = $epoch->getValueDate();
       $this->valueTime  = $epoch->getValueTime();
       $this->allowNull = $epoch->getOptional();
       $this->isDisabled = $epoch->isDisabled();
@@ -119,42 +116,34 @@ final class AphrontFormDateControl extends AphrontFormControl {
     $readable = $this->formatTime($epoch, 'Y!m!d!g:i A');
     $readable = explode('!', $readable, 4);
 
-    $this->valueYear  = $readable[0];
-    $this->valueMonth = $readable[1];
-    $this->valueDay   = $readable[2];
+    $year  = $readable[0];
+    $month = $readable[1];
+    $day   = $readable[2];
+
+    $this->valueDate = $month.'/'.$day.'/'.$year;
     $this->valueTime  = $readable[3];
 
     return $result;
   }
 
-  private function getMinYear() {
-    $cur_year = $this->formatTime(
-      time(),
-      'Y');
-    $val_year = $this->getYearInputValue();
+  private function getDateInputValue() {
+    $date_format = $this->getDateFormat();
+    $timezone = $this->getTimezone();
 
-    return min($cur_year, $val_year) - 3;
+    $datetime = new DateTime($this->valueDate, $timezone);
+    $date = $datetime->format($date_format);
+
+    return $date;
   }
 
-  private function getMaxYear() {
-    $cur_year = $this->formatTime(
-      time(),
-      'Y');
-    $val_year = $this->getYearInputValue();
-
-    return max($cur_year, $val_year) + 3;
+  private function getTimeFormat() {
+    return $this->getViewer()
+      ->getPreference(PhabricatorUserPreferences::PREFERENCE_TIME_FORMAT);
   }
 
-  private function getDayInputValue() {
-    return $this->valueDay;
-  }
-
-  private function getMonthInputValue() {
-    return $this->valueMonth;
-  }
-
-  private function getYearInputValue() {
-    return $this->valueYear;
+  private function getDateFormat() {
+    return $this->getViewer()
+      ->getPreference(PhabricatorUserPreferences::PREFERENCE_DATE_FORMAT);
   }
 
   private function getTimeInputValue() {
@@ -164,20 +153,12 @@ final class AphrontFormDateControl extends AphrontFormControl {
   private function formatTime($epoch, $fmt) {
     return phabricator_format_local_time(
       $epoch,
-      $this->user,
+      $this->getViewer(),
       $fmt);
   }
 
-  private function getDayInputName() {
+  private function getDateInputName() {
     return $this->getName().'_d';
-  }
-
-  private function getMonthInputName() {
-    return $this->getName().'_m';
-  }
-
-  private function getYearInputName() {
-    return $this->getName().'_y';
   }
 
   private function getTimeInputName() {
@@ -202,27 +183,6 @@ final class AphrontFormDateControl extends AphrontFormControl {
       $disabled = 'disabled';
     }
 
-    $min_year = $this->getMinYear();
-    $max_year = $this->getMaxYear();
-
-    $days = range(1, 31);
-    $days = array_fuse($days);
-
-    $months = array(
-      1 => pht('Jan'),
-      2 => pht('Feb'),
-      3 => pht('Mar'),
-      4 => pht('Apr'),
-      5 => pht('May'),
-      6 => pht('Jun'),
-      7 => pht('Jul'),
-      8 => pht('Aug'),
-      9 => pht('Sep'),
-      10 => pht('Oct'),
-      11 => pht('Nov'),
-      12 => pht('Dec'),
-    );
-
     $checkbox = null;
     if ($this->allowNull) {
       $checkbox = javelin_tag(
@@ -237,35 +197,27 @@ final class AphrontFormDateControl extends AphrontFormControl {
         ));
     }
 
-    $years = range($this->getMinYear(), $this->getMaxYear());
-    $years = array_fuse($years);
-
-    $days_sel = AphrontFormSelectControl::renderSelectTag(
-      $this->getDayInputValue(),
-      $days,
+    $date_sel = javelin_tag(
+      'input',
       array(
-        'name' => $this->getDayInputName(),
-        'sigil' => 'day-input',
-      ));
+        'autocomplete' => 'off',
+        'name'  => $this->getDateInputName(),
+        'sigil' => 'date-input',
+        'value' => $this->getDateInputValue(),
+        'type'  => 'text',
+        'class' => 'aphront-form-date-input',
+      ),
+      '');
 
-    $months_sel = AphrontFormSelectControl::renderSelectTag(
-      $this->getMonthInputValue(),
-      $months,
+    $date_div = javelin_tag(
+      'div',
       array(
-        'name' => $this->getMonthInputName(),
-        'sigil' => 'month-input',
-      ));
-
-    $years_sel = AphrontFormSelectControl::renderSelectTag(
-      $this->getYearInputValue(),
-      $years,
-      array(
-        'name'  => $this->getYearInputName(),
-        'sigil' => 'year-input',
-      ));
+        'class' => 'aphront-form-date-input-container',
+      ),
+      $date_sel);
 
     $cicon = id(new PHUIIconView())
-      ->setIconFont('fa-calendar');
+      ->setIcon('fa-calendar');
 
     $cal_icon = javelin_tag(
       'a',
@@ -283,6 +235,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
       'startTimeID' => $time_id,
       'endTimeID' => $this->endDateID,
       'timeValues' => $values,
+      'format' => $this->getTimeFormat(),
       ));
 
 
@@ -294,7 +247,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
         'sigil' => 'time-input',
         'value' => $this->getTimeInputValue(),
         'type'  => 'text',
-        'class' => 'aphront-form-date-time-input',
+        'class' => 'aphront-form-time-input',
       ),
       '');
 
@@ -302,11 +255,18 @@ final class AphrontFormDateControl extends AphrontFormControl {
       'div',
       array(
         'id' => $time_id,
-        'class' => 'aphront-form-date-time-input-container',
+        'class' => 'aphront-form-time-input-container',
       ),
       $time_sel);
 
-    Javelin::initBehavior('fancy-datepicker', array());
+    $preferences = $this->getViewer()->loadPreferences();
+    $pref_week_start = PhabricatorUserPreferences::PREFERENCE_WEEK_START_DAY;
+    $week_start = $preferences->getPreference($pref_week_start, 0);
+
+    Javelin::initBehavior('fancy-datepicker', array(
+      'format' => $this->getDateFormat(),
+      'weekStart' => $week_start,
+      ));
 
     $classes = array();
     $classes[] = 'aphront-form-date-container';
@@ -329,9 +289,7 @@ final class AphrontFormDateControl extends AphrontFormControl {
       ),
       array(
         $checkbox,
-        $days_sel,
-        $months_sel,
-        $years_sel,
+        $date_div,
         $cal_icon,
         $time_div,
       ));
@@ -342,12 +300,9 @@ final class AphrontFormDateControl extends AphrontFormControl {
       return $this->zone;
     }
 
-    $user = $this->getUser();
-    if (!$this->getUser()) {
-      throw new PhutilInvalidStateException('setUser');
-    }
+    $viewer = $this->getViewer();
 
-    $user_zone = $user->getTimezoneIdentifier();
+    $user_zone = $viewer->getTimezoneIdentifier();
     $this->zone = new DateTimeZone($user_zone);
     return $this->zone;
   }
@@ -385,20 +340,31 @@ final class AphrontFormDateControl extends AphrontFormControl {
   }
 
   private function getTimeTypeaheadValues() {
+    $time_format = $this->getTimeFormat();
     $times = array();
-    $am_pm_list = array('AM', 'PM');
 
-    foreach ($am_pm_list as $am_pm) {
-      for ($hour = 0; $hour < 12; $hour++) {
-        $actual_hour = ($hour == 0) ? 12 : $hour;
-        $times[] = $actual_hour.':00 '.$am_pm;
-        $times[] = $actual_hour.':30 '.$am_pm;
+    if ($time_format == 'g:i A') {
+      $am_pm_list = array('AM', 'PM');
+
+      foreach ($am_pm_list as $am_pm) {
+        for ($hour = 0; $hour < 12; $hour++) {
+          $actual_hour = ($hour == 0) ? 12 : $hour;
+          $times[] = $actual_hour.':00 '.$am_pm;
+          $times[] = $actual_hour.':30 '.$am_pm;
+        }
+      }
+    } else if ($time_format == 'H:i') {
+      for ($hour = 0; $hour < 24; $hour++) {
+        $written_hour = ($hour > 9) ? $hour : '0'.$hour;
+        $times[] = $written_hour.':00';
+        $times[] = $written_hour.':30';
       }
     }
 
     foreach ($times as $key => $time) {
       $times[$key] = array($key, $time);
     }
+
     return $times;
   }
 

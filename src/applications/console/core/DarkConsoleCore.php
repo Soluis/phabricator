@@ -1,24 +1,18 @@
 <?php
 
-final class DarkConsoleCore {
+final class DarkConsoleCore extends Phobject {
 
   private $plugins = array();
   const STORAGE_VERSION = 1;
 
   public function __construct() {
-    $symbols = id(new PhutilSymbolLoader())
-      ->setType('class')
+    $this->plugins = id(new PhutilClassMapQuery())
       ->setAncestorClass('DarkConsolePlugin')
-      ->selectAndLoadSymbols();
+      ->execute();
 
-    foreach ($symbols as $symbol) {
-      $plugin = newv($symbol['name'], array());
-      if (!$plugin->shouldStartup()) {
-        continue;
-      }
+    foreach ($this->plugins as $plugin) {
       $plugin->setConsoleCore($this);
       $plugin->didStartup();
-      $this->plugins[$symbol['name']] = $plugin;
     }
   }
 
@@ -127,6 +121,13 @@ final class DarkConsoleCore {
       }
       return $data;
     } else {
+      // Truncate huge strings. Since the data doesn't really matter much,
+      // just truncate bytes to avoid PhutilUTF8StringTruncator overhead.
+      $length = strlen($data);
+      $max = 4096;
+      if ($length > $max) {
+        $data = substr($data, 0, $max).'...<'.$length.' bytes>...';
+      }
       return phutil_utf8ize($data);
     }
   }

@@ -5,39 +5,33 @@
 final class ReleephRequestDifferentialCreateController
   extends ReleephController {
 
-  private $revisionID;
   private $revision;
 
-  public function willProcessRequest(array $data) {
-    $this->revisionID = $data['diffRevID'];
-  }
-
-  public function processRequest() {
-    $request = $this->getRequest();
-    $user = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $revision_id = $request->getURIData('diffRevID');
+    $viewer = $request->getViewer();
 
     $diff_rev = id(new DifferentialRevisionQuery())
-      ->setViewer($user)
-      ->withIDs(array($this->revisionID))
+      ->setViewer($viewer)
+      ->withIDs(array($revision_id))
       ->executeOne();
     if (!$diff_rev) {
       return new Aphront404Response();
     }
     $this->revision = $diff_rev;
 
-    $arc_project = id(new PhabricatorRepositoryArcanistProject())
-      ->loadOneWhere('phid = %s', $this->revision->getArcanistProjectPHID());
+    $repository = $this->revision->getRepository();
 
     $projects = id(new ReleephProject())->loadAllWhere(
-      'arcanistProjectID = %d AND isActive = 1',
-      $arc_project->getID());
+      'repositoryPHID = %s AND isActive = 1',
+      $repository->getPHID());
     if (!$projects) {
       throw new Exception(
         pht(
-          "%s belongs to the '%s' Arcanist project, ".
+          "%s belongs to the '%s' repository, ".
           "which is not part of any Releeph project!",
           'D'.$this->revision->getID(),
-          $arc_project->getName()));
+          $repository->getMonogram()));
     }
 
     $branches = id(new ReleephBranch())->loadAllWhere(
@@ -64,7 +58,7 @@ final class ReleephRequestDifferentialCreateController
 
     require_celerity_resource('releeph-request-differential-create-dialog');
     $dialog = id(new AphrontDialogView())
-      ->setUser($user)
+      ->setUser($viewer)
       ->setTitle(pht('Choose Releeph Branch'))
       ->setClass('releeph-request-differential-create-dialog')
       ->addCancelButton('/D'.$request->getStr('D'));

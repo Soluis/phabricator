@@ -10,6 +10,7 @@
  * @task paging Paging
  * @task order Result Ordering
  * @task edgelogic Working with Edge Logic
+ * @task spaces Working with Spaces
  */
 abstract class PhabricatorCursorPagedPolicyAwareQuery
   extends PhabricatorPolicyAwareQuery {
@@ -17,12 +18,15 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
   private $afterID;
   private $beforeID;
   private $applicationSearchConstraints = array();
-  protected $applicationSearchOrders = array();
   private $internalPaging;
   private $orderVector;
+  private $groupVector;
   private $builtinOrder;
   private $edgeLogicConstraints = array();
   private $edgeLogicConstraintsAreValid = false;
+  private $spacePHIDs;
+  private $spaceIsArchived;
+  private $ngrams = array();
 
   protected function getPageCursors(array $page) {
     return array(
@@ -74,6 +78,29 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     return $this->beforeID;
   }
 
+  protected function loadStandardPage(PhabricatorLiskDAO $table) {
+    $rows = $this->loadStandardPageRows($table);
+    return $table->loadAllFromArray($rows);
+  }
+
+  protected function loadStandardPageRows(PhabricatorLiskDAO $table) {
+    $conn = $table->establishConnection('r');
+
+    $rows = queryfx_all(
+      $conn,
+      '%Q FROM %T %Q %Q %Q %Q %Q %Q %Q',
+      $this->buildSelectClause($conn),
+      $table->getTableName(),
+      (string)$this->getPrimaryTableAlias(),
+      $this->buildJoinClause($conn),
+      $this->buildWhereClause($conn),
+      $this->buildGroupClause($conn),
+      $this->buildHavingClause($conn),
+      $this->buildOrderClause($conn),
+      $this->buildLimitClause($conn));
+
+    return $rows;
+  }
 
   /**
    * Get the viewer for making cursor paging queries.
@@ -175,7 +202,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     return null;
   }
 
-  protected function newResultObject() {
+  public function newResultObject() {
     return null;
   }
 
@@ -227,6 +254,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     $joins = array();
     $joins[] = $this->buildEdgeLogicJoinClause($conn);
     $joins[] = $this->buildApplicationSearchJoinClause($conn);
+    $joins[] = $this->buildNgramsJoinClause($conn);
     return $joins;
   }
 
@@ -247,6 +275,8 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     $where = array();
     $where[] = $this->buildPagingClause($conn);
     $where[] = $this->buildEdgeLogicWhereClause($conn);
+    $where[] = $this->buildSpacesWhereClause($conn);
+    $where[] = $this->buildNgramsWhereClause($conn);
     return $where;
   }
 
@@ -294,6 +324,10 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     }
 
     if ($this->getApplicationSearchMayJoinMultipleRows()) {
+      return true;
+    }
+
+    if ($this->shouldGroupNgramResultRows()) {
       return true;
     }
 
@@ -347,6 +381,12 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       $column = $orderable[$key];
       $column['value'] = $value_map[$key];
 
+      // If the vector component is reversed, we need to reverse whatever the
+      // order of the column is.
+      if ($order->getIsReversed()) {
+        $column['reverse'] = !idx($column, 'reverse', false);
+      }
+
       $columns[] = $column;
     }
 
@@ -383,8 +423,9 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     if (!$object) {
       throw new Exception(
         pht(
-          'Cursor "%s" does not identify a valid object.',
-          $cursor));
+          'Cursor "%s" does not identify a valid object in query "%s".',
+          $cursor,
+          get_class($this)));
     }
 
     return $object;
@@ -602,19 +643,40 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
    * @task order
    */
   public function setOrder($order) {
-    $orders = $this->getBuiltinOrders();
+    $aliases = $this->getBuiltinOrderAliasMap();
 
-    if (empty($orders[$order])) {
+    if (empty($aliases[$order])) {
       throw new Exception(
         pht(
           'Query "%s" does not support a builtin order "%s". Supported orders '.
           'are: %s.',
           get_class($this),
           $order,
-          implode(', ', array_keys($orders))));
+          implode(', ', array_keys($aliases))));
     }
 
-    $this->builtinOrder = $order;
+    $this->builtinOrder = $aliases[$order];
+    $this->orderVector = null;
+
+    return $this;
+  }
+
+
+  /**
+   * Set a grouping order to apply before primary result ordering.
+   *
+   * This allows you to preface the query order vector with additional orders,
+   * so you can effect "group by" queries while still respecting "order by".
+   *
+   * This is a high-level method which works alongside @{method:setOrder}. For
+   * lower-level control over order vectors, use @{method:setOrderVector}.
+   *
+   * @param PhabricatorQueryOrderVector|list<string> List of order keys.
+   * @return this
+   * @task order
+   */
+  public function setGroupVector($vector) {
+    $this->groupVector = $vector;
     $this->orderVector = null;
 
     return $this;
@@ -667,18 +729,52 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
           continue;
         }
 
-        $key = $field->getFieldKey();
-        $digest = $field->getFieldIndex();
+        $legacy_key = 'custom:'.$field->getFieldKey();
+        $modern_key = $field->getModernFieldKey();
 
-        $full_key = 'custom:'.$key;
-        $orders[$full_key] = array(
-          'vector' => array($full_key, 'id'),
+        $orders[$modern_key] = array(
+          'vector' => array($modern_key, 'id'),
           'name' => $field->getFieldName(),
+          'aliases' => array($legacy_key),
+        );
+
+        $orders['-'.$modern_key] = array(
+          'vector' => array('-'.$modern_key, '-id'),
+          'name' => pht('%s (Reversed)', $field->getFieldName()),
         );
       }
     }
 
     return $orders;
+  }
+
+  public function getBuiltinOrderAliasMap() {
+    $orders = $this->getBuiltinOrders();
+
+    $map = array();
+    foreach ($orders as $key => $order) {
+      $keys = array();
+      $keys[] = $key;
+      foreach (idx($order, 'aliases', array()) as $alias) {
+        $keys[] = $alias;
+      }
+
+      foreach ($keys as $alias) {
+        if (isset($map[$alias])) {
+          throw new Exception(
+            pht(
+              'Two builtin orders ("%s" and "%s") define the same key or '.
+              'alias ("%s"). Each order alias and key must be unique and '.
+              'identify a single order.',
+              $key,
+              $map[$alias],
+              $alias));
+        }
+        $map[$alias] = $key;
+      }
+    }
+
+    return $map;
   }
 
 
@@ -765,6 +861,13 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       } else {
         $vector = $this->getDefaultOrderVector();
       }
+
+      if ($this->groupVector) {
+        $group = PhabricatorQueryOrderVector::newFromVector($this->groupVector);
+        $group->appendVector($vector);
+        $vector = $group;
+      }
+
       $vector = PhabricatorQueryOrderVector::newFromVector($vector);
 
       // We call setOrderVector() here to apply checks to the default vector.
@@ -788,6 +891,15 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
    * @task order
    */
   public function getOrderableColumns() {
+    $cache = PhabricatorCaches::getRequestCache();
+    $class = get_class($this);
+    $cache_key = 'query.orderablecolumns.'.$class;
+
+    $columns = $cache->getKey($cache_key);
+    if ($columns !== null) {
+      return $columns;
+    }
+
     $columns = array(
       'id' => array(
         'table' => $this->getPrimaryTableAlias(),
@@ -809,18 +921,23 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
           continue;
         }
 
-        $key = $field->getFieldKey();
         $digest = $field->getFieldIndex();
 
-        $full_key = 'custom:'.$key;
-        $columns[$full_key] = array(
+        $key = $field->getModernFieldKey();
+
+        $columns[$key] = array(
           'table' => 'appsearch_order_'.$digest,
           'column' => 'indexValue',
           'type' => $index->getIndexValueType(),
           'null' => 'tail',
+          'customfield' => true,
+          'customfield.index.table' => $index->getTableName(),
+          'customfield.index.key' => $digest,
         );
       }
     }
+
+    $cache->setKey($cache_key, $columns);
 
     return $columns;
   }
@@ -987,32 +1104,6 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       'table' => $index->getTableName(),
       'index' => $index->getIndexKey(),
       'value' => array($min, $max),
-    );
-
-    return $this;
-  }
-
-
-  /**
-   * Order the results by an ApplicationSearch index.
-   *
-   * @param PhabricatorCustomField Field to which the index belongs.
-   * @param PhabricatorCustomFieldIndexStorage Table where the index is stored.
-   * @param bool True to sort ascending.
-   * @return this
-   * @task appsearch
-   */
-  public function withApplicationSearchOrder(
-    PhabricatorCustomField $field,
-    PhabricatorCustomFieldIndexStorage $index,
-    $ascending) {
-
-    $this->applicationSearchOrders[] = array(
-      'key' => $field->getFieldKey(),
-      'type' => $index->getIndexValueType(),
-      'table' => $index->getTableName(),
-      'index' => $index->getIndexKey(),
-      'ascending' => $ascending,
     );
 
     return $this;
@@ -1203,11 +1294,19 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       }
     }
 
-    foreach ($this->applicationSearchOrders as $key => $order) {
-      $table = $order['table'];
-      $index = $order['index'];
-      $alias = 'appsearch_order_'.$index;
-      $phid_column = $this->getApplicationSearchObjectPHIDColumn();
+    $phid_column = $this->getApplicationSearchObjectPHIDColumn();
+    $orderable = $this->getOrderableColumns();
+
+    $vector = $this->getOrderVector();
+    foreach ($vector as $order) {
+      $spec = $orderable[$order->getOrderKey()];
+      if (empty($spec['customfield'])) {
+        continue;
+      }
+
+      $table = $spec['customfield.index.table'];
+      $alias = $spec['table'];
+      $key = $spec['customfield.index.key'];
 
       $joins[] = qsprintf(
         $conn_r,
@@ -1218,7 +1317,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
         $alias,
         $phid_column,
         $alias,
-        $index);
+        $key);
     }
 
     return implode(' ', $joins);
@@ -1259,6 +1358,138 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
   }
 
 
+/* -(  Ngrams  )------------------------------------------------------------- */
+
+
+  protected function withNgramsConstraint(
+    PhabricatorSearchNgrams $index,
+    $value) {
+
+    if (strlen($value)) {
+      $this->ngrams[] = array(
+        'index' => $index,
+        'value' => $value,
+        'length' => count(phutil_utf8v($value)),
+      );
+    }
+
+    return $this;
+  }
+
+
+  protected function buildNgramsJoinClause(AphrontDatabaseConnection $conn) {
+    $flat = array();
+    foreach ($this->ngrams as $spec) {
+      $index = $spec['index'];
+      $value = $spec['value'];
+      $length = $spec['length'];
+
+      if ($length >= 3) {
+        $ngrams = $index->getNgramsFromString($value, 'query');
+        $prefix = false;
+      } else if ($length == 2) {
+        $ngrams = $index->getNgramsFromString($value, 'prefix');
+        $prefix = false;
+      } else {
+        $ngrams = array(' '.$value);
+        $prefix = true;
+      }
+
+      foreach ($ngrams as $ngram) {
+        $flat[] = array(
+          'table' => $index->getTableName(),
+          'ngram' => $ngram,
+          'prefix' => $prefix,
+        );
+      }
+    }
+
+    // MySQL only allows us to join a maximum of 61 tables per query. Each
+    // ngram is going to cost us a join toward that limit, so if the user
+    // specified a very long query string, just pick 16 of the ngrams
+    // at random.
+    if (count($flat) > 16) {
+      shuffle($flat);
+      $flat = array_slice($flat, 0, 16);
+    }
+
+    $alias = $this->getPrimaryTableAlias();
+    if ($alias) {
+      $id_column = qsprintf($conn, '%T.%T', $alias, 'id');
+    } else {
+      $id_column = qsprintf($conn, '%T', 'id');
+    }
+
+    $idx = 1;
+    $joins = array();
+    foreach ($flat as $spec) {
+      $table = $spec['table'];
+      $ngram = $spec['ngram'];
+      $prefix = $spec['prefix'];
+
+      $alias = 'ngm'.$idx++;
+
+      if ($prefix) {
+        $joins[] = qsprintf(
+          $conn,
+          'JOIN %T %T ON %T.objectID = %Q AND %T.ngram LIKE %>',
+          $table,
+          $alias,
+          $alias,
+          $id_column,
+          $alias,
+          $ngram);
+      } else {
+        $joins[] = qsprintf(
+          $conn,
+          'JOIN %T %T ON %T.objectID = %Q AND %T.ngram = %s',
+          $table,
+          $alias,
+          $alias,
+          $id_column,
+          $alias,
+          $ngram);
+      }
+    }
+
+    return $joins;
+  }
+
+
+  protected function buildNgramsWhereClause(AphrontDatabaseConnection $conn) {
+    $where = array();
+
+    foreach ($this->ngrams as $ngram) {
+      $index = $ngram['index'];
+      $value = $ngram['value'];
+
+      $column = $index->getColumnName();
+      $alias = $this->getPrimaryTableAlias();
+      if ($alias) {
+        $column = qsprintf($conn, '%T.%T', $alias, $column);
+      } else {
+        $column = qsprintf($conn, '%T', $column);
+      }
+
+      $tokens = $index->tokenizeString($value);
+      foreach ($tokens as $token) {
+        $where[] = qsprintf(
+          $conn,
+          '%Q LIKE %~',
+          $column,
+          $token);
+      }
+    }
+
+    return $where;
+  }
+
+
+  protected function shouldGroupNgramResultRows() {
+    return (bool)$this->ngrams;
+  }
+
+
 /* -(  Edge Logic  )--------------------------------------------------------- */
 
 
@@ -1291,8 +1522,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     $constraints = mgroup($constraints, 'getOperator');
     foreach ($constraints as $operator => $list) {
       foreach ($list as $item) {
-        $value = $item->getValue();
-        $this->edgeLogicConstraints[$edge_type][$operator][$value] = $item;
+        $this->edgeLogicConstraints[$edge_type][$operator][] = $item;
       }
     }
 
@@ -1323,6 +1553,47 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
                 $this->buildEdgeLogicTableAliasCount($alias));
             }
             break;
+          case PhabricatorQueryConstraint::OPERATOR_ANCESTOR:
+            // This is tricky. We have a query which specifies multiple
+            // projects, each of which may have an arbitrarily large number
+            // of descendants.
+
+            // Suppose the projects are "Engineering" and "Operations", and
+            // "Engineering" has subprojects X, Y and Z.
+
+            // We first use `FIELD(dst, X, Y, Z)` to produce a 0 if a row
+            // is not part of Engineering at all, or some number other than
+            // 0 if it is.
+
+            // Then we use `IF(..., idx, NULL)` to convert the 0 to a NULL and
+            // any other value to an index (say, 1) for the ancestor.
+
+            // We build these up for every ancestor, then use `COALESCE(...)`
+            // to select the non-null one, giving us an ancestor which this
+            // row is a member of.
+
+            // From there, we use `COUNT(DISTINCT(...))` to make sure that
+            // each result row is a member of all ancestors.
+            if (count($list) > 1) {
+              $idx = 1;
+              $parts = array();
+              foreach ($list as $constraint) {
+                $parts[] = qsprintf(
+                  $conn,
+                  'IF(FIELD(%T.dst, %Ls) != 0, %d, NULL)',
+                  $alias,
+                  (array)$constraint->getValue(),
+                  $idx++);
+              }
+              $parts = implode(', ', $parts);
+
+              $select[] = qsprintf(
+                $conn,
+                'COUNT(DISTINCT(COALESCE(%Q))) %T',
+                $parts,
+                $this->buildEdgeLogicTableAliasAncestor($alias));
+            }
+            break;
           default:
             break;
         }
@@ -1348,6 +1619,16 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
 
       foreach ($constraints as $operator => $list) {
         $alias = $this->getEdgeLogicTableAlias($operator, $type);
+
+        $phids = array();
+        foreach ($list as $constraint) {
+          $value = (array)$constraint->getValue();
+          foreach ($value as $v) {
+            $phids[$v] = $v;
+          }
+        }
+        $phids = array_keys($phids);
+
         switch ($operator) {
           case PhabricatorQueryConstraint::OPERATOR_NOT:
             $joins[] = qsprintf(
@@ -1361,8 +1642,9 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
               $alias,
               $type,
               $alias,
-              mpull($list, 'getValue'));
+              $phids);
             break;
+          case PhabricatorQueryConstraint::OPERATOR_ANCESTOR:
           case PhabricatorQueryConstraint::OPERATOR_AND:
           case PhabricatorQueryConstraint::OPERATOR_OR:
             // If we're including results with no matches, we have to degrade
@@ -1386,7 +1668,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
               $alias,
               $type,
               $alias,
-              mpull($list, 'getValue'));
+              $phids);
             break;
           case PhabricatorQueryConstraint::OPERATOR_NULL:
             $joins[] = qsprintf(
@@ -1486,6 +1768,15 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
                 count($list));
             }
             break;
+          case PhabricatorQueryConstraint::OPERATOR_ANCESTOR:
+            if (count($list) > 1) {
+              $having[] = qsprintf(
+                $conn,
+                '%T = %d',
+                $this->buildEdgeLogicTableAliasAncestor($alias),
+                count($list));
+            }
+            break;
         }
       }
     }
@@ -1504,6 +1795,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
           case PhabricatorQueryConstraint::OPERATOR_NOT:
           case PhabricatorQueryConstraint::OPERATOR_AND:
           case PhabricatorQueryConstraint::OPERATOR_OR:
+          case PhabricatorQueryConstraint::OPERATOR_ANCESTOR:
             if (count($list) > 1) {
               return true;
             }
@@ -1533,6 +1825,13 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     return $alias.'_count';
   }
 
+  /**
+   * @task edgelogic
+   */
+  private function buildEdgeLogicTableAliasAncestor($alias) {
+    return $alias.'_ancestor';
+  }
+
 
   /**
    * Select certain edge logic constraint values.
@@ -1556,7 +1855,10 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       }
       foreach ($constraints as $operator => $list) {
         foreach ($list as $constraint) {
-          $values[] = $constraint->getValue();
+          $value = (array)$constraint->getValue();
+          foreach ($value as $v) {
+            $values[] = $v;
+          }
         }
       }
     }
@@ -1576,6 +1878,16 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
       return $this;
     }
 
+    foreach ($this->edgeLogicConstraints as $type => $constraints) {
+      foreach ($constraints as $operator => $list) {
+        switch ($operator) {
+          case PhabricatorQueryConstraint::OPERATOR_EMPTY:
+            throw new PhabricatorEmptyQueryException(
+              pht('This query specifies an empty constraint.'));
+        }
+      }
+    }
+
     // This should probably be more modular, eventually, but we only do
     // project-based edge logic today.
 
@@ -1587,6 +1899,7 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
         PhabricatorQueryConstraint::OPERATOR_AND,
         PhabricatorQueryConstraint::OPERATOR_OR,
         PhabricatorQueryConstraint::OPERATOR_NOT,
+        PhabricatorQueryConstraint::OPERATOR_ANCESTOR,
       ));
     if ($project_phids) {
       $projects = id(new PhabricatorProjectQuery())
@@ -1610,5 +1923,184 @@ abstract class PhabricatorCursorPagedPolicyAwareQuery
     return $this;
   }
 
+
+/* -(  Spaces  )------------------------------------------------------------- */
+
+
+  /**
+   * Constrain the query to return results from only specific Spaces.
+   *
+   * Pass a list of Space PHIDs, or `null` to represent the default space. Only
+   * results in those Spaces will be returned.
+   *
+   * Queries are always constrained to include only results from spaces the
+   * viewer has access to.
+   *
+   * @param list<phid|null>
+   * @task spaces
+   */
+  public function withSpacePHIDs(array $space_phids) {
+    $object = $this->newResultObject();
+
+    if (!$object) {
+      throw new Exception(
+        pht(
+          'This query (of class "%s") does not implement newResultObject(), '.
+          'but must implement this method to enable support for Spaces.',
+          get_class($this)));
+    }
+
+    if (!($object instanceof PhabricatorSpacesInterface)) {
+      throw new Exception(
+        pht(
+          'This query (of class "%s") returned an object of class "%s" from '.
+          'getNewResultObject(), but it does not implement the required '.
+          'interface ("%s"). Objects must implement this interface to enable '.
+          'Spaces support.',
+          get_class($this),
+          get_class($object),
+          'PhabricatorSpacesInterface'));
+    }
+
+    $this->spacePHIDs = $space_phids;
+
+    return $this;
+  }
+
+  public function withSpaceIsArchived($archived) {
+    $this->spaceIsArchived = $archived;
+    return $this;
+  }
+
+
+  /**
+   * Constrain the query to include only results in valid Spaces.
+   *
+   * This method builds part of a WHERE clause which considers the spaces the
+   * viewer has access to see with any explicit constraint on spaces added by
+   * @{method:withSpacePHIDs}.
+   *
+   * @param AphrontDatabaseConnection Database connection.
+   * @return string Part of a WHERE clause.
+   * @task spaces
+   */
+  private function buildSpacesWhereClause(AphrontDatabaseConnection $conn) {
+    $object = $this->newResultObject();
+    if (!$object) {
+      return null;
+    }
+
+    if (!($object instanceof PhabricatorSpacesInterface)) {
+      return null;
+    }
+
+    $viewer = $this->getViewer();
+
+    // If we have an omnipotent viewer and no formal space constraints, don't
+    // emit a clause. This primarily enables older migrations to run cleanly,
+    // without fataling because they try to match a `spacePHID` column which
+    // does not exist yet. See T8743, T8746.
+    if ($viewer->isOmnipotent()) {
+      if ($this->spaceIsArchived === null && $this->spacePHIDs === null) {
+        return null;
+      }
+    }
+
+    $space_phids = array();
+    $include_null = false;
+
+    $all = PhabricatorSpacesNamespaceQuery::getAllSpaces();
+    if (!$all) {
+      // If there are no spaces at all, implicitly give the viewer access to
+      // the default space.
+      $include_null = true;
+    } else {
+      // Otherwise, give them access to the spaces they have permission to
+      // see.
+      $viewer_spaces = PhabricatorSpacesNamespaceQuery::getViewerSpaces(
+        $viewer);
+      foreach ($viewer_spaces as $viewer_space) {
+        if ($this->spaceIsArchived !== null) {
+          if ($viewer_space->getIsArchived() != $this->spaceIsArchived) {
+            continue;
+          }
+        }
+        $phid = $viewer_space->getPHID();
+        $space_phids[$phid] = $phid;
+        if ($viewer_space->getIsDefaultNamespace()) {
+          $include_null = true;
+        }
+      }
+    }
+
+    // If we have additional explicit constraints, evaluate them now.
+    if ($this->spacePHIDs !== null) {
+      $explicit = array();
+      $explicit_null = false;
+      foreach ($this->spacePHIDs as $phid) {
+        if ($phid === null) {
+          $space = PhabricatorSpacesNamespaceQuery::getDefaultSpace();
+        } else {
+          $space = idx($all, $phid);
+        }
+
+        if ($space) {
+          $phid = $space->getPHID();
+          $explicit[$phid] = $phid;
+          if ($space->getIsDefaultNamespace()) {
+            $explicit_null = true;
+          }
+        }
+      }
+
+      // If the viewer can see the default space but it isn't on the explicit
+      // list of spaces to query, don't match it.
+      if ($include_null && !$explicit_null) {
+        $include_null = false;
+      }
+
+      // Include only the spaces common to the viewer and the constraints.
+      $space_phids = array_intersect_key($space_phids, $explicit);
+    }
+
+    if (!$space_phids && !$include_null) {
+      if ($this->spacePHIDs === null) {
+        throw new PhabricatorEmptyQueryException(
+          pht('You do not have access to any spaces.'));
+      } else {
+        throw new PhabricatorEmptyQueryException(
+          pht(
+            'You do not have access to any of the spaces this query '.
+            'is constrained to.'));
+      }
+    }
+
+    $alias = $this->getPrimaryTableAlias();
+    if ($alias) {
+      $col = qsprintf($conn, '%T.spacePHID', $alias);
+    } else {
+      $col = 'spacePHID';
+    }
+
+    if ($space_phids && $include_null) {
+      return qsprintf(
+        $conn,
+        '(%Q IN (%Ls) OR %Q IS NULL)',
+        $col,
+        $space_phids,
+        $col);
+    } else if ($space_phids) {
+      return qsprintf(
+        $conn,
+        '%Q IN (%Ls)',
+        $col,
+        $space_phids);
+    } else {
+      return qsprintf(
+        $conn,
+        '%Q IS NULL',
+        $col);
+    }
+  }
 
 }

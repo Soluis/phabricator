@@ -142,6 +142,22 @@ abstract class PhabricatorApplicationTransaction
     return $this->comment;
   }
 
+  public function setIsCreateTransaction($create) {
+    return $this->setMetadataValue('core.create', $create);
+  }
+
+  public function getIsCreateTransaction() {
+    return (bool)$this->getMetadataValue('core.create', false);
+  }
+
+  public function setIsDefaultTransaction($default) {
+    return $this->setMetadataValue('core.default', $default);
+  }
+
+  public function getIsDefaultTransaction() {
+    return (bool)$this->getMetadataValue('core.default', false);
+  }
+
   public function attachComment(
     PhabricatorApplicationTransactionComment $comment) {
     $this->comment = $comment;
@@ -243,10 +259,18 @@ abstract class PhabricatorApplicationTransaction
       case PhabricatorTransactions::TYPE_EDIT_POLICY:
       case PhabricatorTransactions::TYPE_VIEW_POLICY:
       case PhabricatorTransactions::TYPE_JOIN_POLICY:
-        if (!PhabricatorPolicyQuery::isGlobalPolicy($old)) {
+        if (!PhabricatorPolicyQuery::isSpecialPolicy($old)) {
           $phids[] = array($old);
         }
-        if (!PhabricatorPolicyQuery::isGlobalPolicy($new)) {
+        if (!PhabricatorPolicyQuery::isSpecialPolicy($new)) {
+          $phids[] = array($new);
+        }
+        break;
+      case PhabricatorTransactions::TYPE_SPACE:
+        if ($old) {
+          $phids[] = array($old);
+        }
+        if ($new) {
           $phids[] = array($new);
         }
         break;
@@ -354,11 +378,23 @@ abstract class PhabricatorApplicationTransaction
       case PhabricatorTransactions::TYPE_COMMENT:
         $comment = $this->getComment();
         if ($comment && $comment->getIsRemoved()) {
-          return 'fa-eraser';
+          return 'fa-trash';
         }
         return 'fa-comment';
       case PhabricatorTransactions::TYPE_SUBSCRIBERS:
-        return 'fa-envelope';
+        $old = $this->getOldValue();
+        $new = $this->getNewValue();
+        $add = array_diff($new, $old);
+        $rem = array_diff($old, $new);
+        if ($add && $rem) {
+          return 'fa-user';
+        } else if ($add) {
+          return 'fa-user-plus';
+        } else if ($rem) {
+          return 'fa-user-times';
+        } else {
+          return 'fa-user';
+        }
       case PhabricatorTransactions::TYPE_VIEW_POLICY:
       case PhabricatorTransactions::TYPE_EDIT_POLICY:
       case PhabricatorTransactions::TYPE_JOIN_POLICY:
@@ -369,6 +405,8 @@ abstract class PhabricatorApplicationTransaction
         return 'fa-wrench';
       case PhabricatorTransactions::TYPE_TOKEN:
         return 'fa-trophy';
+      case PhabricatorTransactions::TYPE_SPACE:
+        return 'fa-th-large';
     }
 
     return 'fa-pencil';
@@ -418,8 +456,14 @@ abstract class PhabricatorApplicationTransaction
           return null;
         }
 
+        $object = $this->getObject();
+
+        if (!($object instanceof PhabricatorCustomFieldInterface)) {
+          return null;
+        }
+
         $field = PhabricatorCustomField::getObjectField(
-          $this->getObject(),
+          $object,
           PhabricatorCustomField::ROLE_APPLICATIONTRANSACTIONS,
           $key);
         if (!$field) {
@@ -434,10 +478,66 @@ abstract class PhabricatorApplicationTransaction
   }
 
   public function shouldHide() {
+    // Never hide comments.
+    if ($this->hasComment()) {
+      return false;
+    }
+
+    // Hide creation transactions if the old value is empty. These are
+    // transactions like "alice set the task tile to: ...", which are
+    // essentially never interesting.
+    if ($this->getIsCreateTransaction()) {
+      switch ($this->getTransactionType()) {
+        case PhabricatorTransactions::TYPE_CREATE:
+        case PhabricatorTransactions::TYPE_VIEW_POLICY:
+        case PhabricatorTransactions::TYPE_EDIT_POLICY:
+        case PhabricatorTransactions::TYPE_JOIN_POLICY:
+        case PhabricatorTransactions::TYPE_SPACE:
+          break;
+        default:
+          $old = $this->getOldValue();
+
+          if (is_array($old) && !$old) {
+            return true;
+          }
+
+          if (!strlen($old)) {
+            return true;
+          }
+          break;
+      }
+    }
+
+    // Hide creation transactions setting values to defaults, even if
+    // the old value is not empty. For example, tasks may have a global
+    // default view policy of "All Users", but a particular form sets the
+    // policy to "Administrators". The transaction corresponding to this
+    // change is not interesting, since it is the default behavior of the
+    // form.
+
+    if ($this->getIsCreateTransaction()) {
+      if ($this->getIsDefaultTransaction()) {
+        return true;
+      }
+    }
+
     switch ($this->getTransactionType()) {
       case PhabricatorTransactions::TYPE_VIEW_POLICY:
       case PhabricatorTransactions::TYPE_EDIT_POLICY:
       case PhabricatorTransactions::TYPE_JOIN_POLICY:
+      case PhabricatorTransactions::TYPE_SPACE:
+        if ($this->getIsCreateTransaction()) {
+          break;
+        }
+
+        // TODO: Remove this eventually, this is handling old changes during
+        // object creation prior to the introduction of "create" and "default"
+        // transaction display flags.
+
+        // NOTE: We can also hit this case with Space transactions that later
+        // update a default space (`null`) to an explicit space, so handling
+        // the Space case may require some finesse.
+
         if ($this->getOldValue() === null) {
           return true;
         } else {
@@ -476,6 +576,10 @@ abstract class PhabricatorApplicationTransaction
   }
 
   public function shouldHideForMail(array $xactions) {
+    if ($this->isSelfSubscription()) {
+      return true;
+    }
+
     switch ($this->getTransactionType()) {
       case PhabricatorTransactions::TYPE_TOKEN:
         return true;
@@ -501,30 +605,37 @@ abstract class PhabricatorApplicationTransaction
         break;
     }
 
-    // If a transaction publishes an inline comment:
-    //
-    //   - Don't show it if there are other kinds of transactions. The
-    //     rationale here is that application mail will make the presence
-    //     of inline comments obvious enough by including them prominently
-    //     in the body. We could change this in the future if the obviousness
-    //     needs to be increased.
-    //   - If there are only inline transactions, only show the first
-    //     transaction. The rationale is that seeing multiple "added an inline
-    //     comment" transactions is not useful.
-
     if ($this->isInlineCommentTransaction()) {
+      $inlines = array();
+
+      // If there's a normal comment, we don't need to publish the inline
+      // transaction, since the normal comment covers things.
       foreach ($xactions as $xaction) {
-        if (!$xaction->isInlineCommentTransaction()) {
+        if ($xaction->isInlineCommentTransaction()) {
+          $inlines[] = $xaction;
+          continue;
+        }
+
+        // We found a normal comment, so hide this inline transaction.
+        if ($xaction->hasComment()) {
           return true;
         }
       }
-      return ($this !== head($xactions));
+
+      // If there are several inline comments, only publish the first one.
+      if ($this !== head($inlines)) {
+        return true;
+      }
     }
 
     return $this->shouldHide();
   }
 
   public function shouldHideForFeed() {
+    if ($this->isSelfSubscription()) {
+      return true;
+    }
+
     switch ($this->getTransactionType()) {
       case PhabricatorTransactions::TYPE_TOKEN:
         return true;
@@ -597,11 +708,15 @@ abstract class PhabricatorApplicationTransaction
         return pht(
           'All users are already subscribed to this %s.',
           $this->getApplicationObjectTypeName());
+      case PhabricatorTransactions::TYPE_SPACE:
+        return pht('This object is already in that space.');
       case PhabricatorTransactions::TYPE_EDGE:
         return pht('Edges already exist; transaction has no effect.');
     }
 
-    return pht('Transaction has no effect.');
+    return pht(
+      'Transaction (of type "%s") has no effect.',
+      $this->getTransactionType());
   }
 
   public function getTitle() {
@@ -611,31 +726,66 @@ abstract class PhabricatorApplicationTransaction
     $new = $this->getNewValue();
 
     switch ($this->getTransactionType()) {
+      case PhabricatorTransactions::TYPE_CREATE:
+        return pht(
+          '%s created this object.',
+          $this->renderHandleLink($author_phid));
       case PhabricatorTransactions::TYPE_COMMENT:
         return pht(
           '%s added a comment.',
           $this->renderHandleLink($author_phid));
       case PhabricatorTransactions::TYPE_VIEW_POLICY:
-        return pht(
-          '%s changed the visibility of this %s from "%s" to "%s".',
-          $this->renderHandleLink($author_phid),
-          $this->getApplicationObjectTypeName(),
-          $this->renderPolicyName($old, 'old'),
-          $this->renderPolicyName($new, 'new'));
+        if ($this->getIsCreateTransaction()) {
+          return pht(
+            '%s created this object with visibility "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($new, 'new'));
+        } else {
+          return pht(
+            '%s changed the visibility from "%s" to "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($old, 'old'),
+            $this->renderPolicyName($new, 'new'));
+        }
       case PhabricatorTransactions::TYPE_EDIT_POLICY:
-        return pht(
-          '%s changed the edit policy of this %s from "%s" to "%s".',
-          $this->renderHandleLink($author_phid),
-          $this->getApplicationObjectTypeName(),
-          $this->renderPolicyName($old, 'old'),
-          $this->renderPolicyName($new, 'new'));
+        if ($this->getIsCreateTransaction()) {
+          return pht(
+            '%s created this object with edit policy "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($new, 'new'));
+        } else {
+          return pht(
+            '%s changed the edit policy from "%s" to "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($old, 'old'),
+            $this->renderPolicyName($new, 'new'));
+        }
       case PhabricatorTransactions::TYPE_JOIN_POLICY:
-        return pht(
-          '%s changed the join policy of this %s from "%s" to "%s".',
-          $this->renderHandleLink($author_phid),
-          $this->getApplicationObjectTypeName(),
-          $this->renderPolicyName($old, 'old'),
-          $this->renderPolicyName($new, 'new'));
+        if ($this->getIsCreateTransaction()) {
+          return pht(
+            '%s created this object with join policy "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($new, 'new'));
+        } else {
+          return pht(
+            '%s changed the join policy from "%s" to "%s".',
+            $this->renderHandleLink($author_phid),
+            $this->renderPolicyName($old, 'old'),
+            $this->renderPolicyName($new, 'new'));
+        }
+      case PhabricatorTransactions::TYPE_SPACE:
+        if ($this->getIsCreateTransaction()) {
+          return pht(
+            '%s created this object in space %s.',
+            $this->renderHandleLink($author_phid),
+            $this->renderHandleLink($new));
+        } else {
+          return pht(
+            '%s shifted this object from the %s space to the %s space.',
+            $this->renderHandleLink($author_phid),
+            $this->renderHandleLink($old),
+            $this->renderHandleLink($new));
+        }
       case PhabricatorTransactions::TYPE_SUBSCRIBERS:
         $add = array_diff($new, $old);
         $rem = array_diff($old, $new);
@@ -682,19 +832,19 @@ abstract class PhabricatorApplicationTransaction
           return $type_obj->getTransactionEditString(
             $this->renderHandleLink($author_phid),
             new PhutilNumber(count($add) + count($rem)),
-            new PhutilNumber(count($add)),
+            phutil_count($add),
             $this->renderHandleList($add),
-            new PhutilNumber(count($rem)),
+            phutil_count($rem),
             $this->renderHandleList($rem));
         } else if ($add) {
           return $type_obj->getTransactionAddString(
             $this->renderHandleLink($author_phid),
-            new PhutilNumber(count($add)),
+            phutil_count($add),
             $this->renderHandleList($add));
         } else if ($rem) {
           return $type_obj->getTransactionRemoveString(
             $this->renderHandleLink($author_phid),
-            new PhutilNumber(count($rem)),
+            phutil_count($rem),
             $this->renderHandleList($rem));
         } else {
           return $type_obj->getTransactionPreviewString(
@@ -796,6 +946,11 @@ abstract class PhabricatorApplicationTransaction
     $new = $this->getNewValue();
 
     switch ($this->getTransactionType()) {
+      case PhabricatorTransactions::TYPE_CREATE:
+        return pht(
+          '%s created %s.',
+          $this->renderHandleLink($author_phid),
+          $this->renderHandleLink($object_phid));
       case PhabricatorTransactions::TYPE_COMMENT:
         return pht(
           '%s added a comment to %s.',
@@ -821,6 +976,13 @@ abstract class PhabricatorApplicationTransaction
           '%s updated subscribers of %s.',
           $this->renderHandleLink($author_phid),
           $this->renderHandleLink($object_phid));
+      case PhabricatorTransactions::TYPE_SPACE:
+        return pht(
+          '%s shifted %s from the %s space to the %s space.',
+          $this->renderHandleLink($author_phid),
+          $this->renderHandleLink($object_phid),
+          $this->renderHandleLink($old),
+          $this->renderHandleLink($new));
       case PhabricatorTransactions::TYPE_EDGE:
         $new = ipull($new, 'dst');
         $old = ipull($old, 'dst');
@@ -836,21 +998,21 @@ abstract class PhabricatorApplicationTransaction
             $this->renderHandleLink($author_phid),
             $this->renderHandleLink($object_phid),
             new PhutilNumber(count($add) + count($rem)),
-            new PhutilNumber(count($add)),
+            phutil_count($add),
             $this->renderHandleList($add),
-            new PhutilNumber(count($rem)),
+            phutil_count($rem),
             $this->renderHandleList($rem));
         } else if ($add) {
           return $type_obj->getFeedAddString(
             $this->renderHandleLink($author_phid),
             $this->renderHandleLink($object_phid),
-            new PhutilNumber(count($add)),
+            phutil_count($add),
             $this->renderHandleList($add));
         } else if ($rem) {
           return $type_obj->getFeedRemoveString(
             $this->renderHandleLink($author_phid),
             $this->renderHandleLink($object_phid),
-            new PhutilNumber(count($rem)),
+            phutil_count($rem),
             $this->renderHandleList($rem));
         } else {
           return pht(
@@ -927,6 +1089,12 @@ abstract class PhabricatorApplicationTransaction
   }
 
   public function getBodyForFeed(PhabricatorFeedStory $story) {
+    $remarkup = $this->getRemarkupBodyForFeed($story);
+    if ($remarkup !== null) {
+      $remarkup = PhabricatorMarkupEngine::summarize($remarkup);
+      return new PHUIRemarkupView($this->viewer, $remarkup);
+    }
+
     $old = $this->getOldValue();
     $new = $this->getNewValue();
 
@@ -944,6 +1112,10 @@ abstract class PhabricatorApplicationTransaction
     return $body;
   }
 
+  public function getRemarkupBodyForFeed(PhabricatorFeedStory $story) {
+    return null;
+  }
+
   public function getActionStrength() {
     if ($this->isInlineCommentTransaction()) {
       return 0.25;
@@ -953,33 +1125,13 @@ abstract class PhabricatorApplicationTransaction
       case PhabricatorTransactions::TYPE_COMMENT:
         return 0.5;
       case PhabricatorTransactions::TYPE_SUBSCRIBERS:
-        $old = $this->getOldValue();
-        $new = $this->getNewValue();
-
-        $add = array_diff($old, $new);
-        $rem = array_diff($new, $old);
-
-        // If this action is the actor subscribing or unsubscribing themselves,
-        // it is less interesting. In particular, if someone makes a comment and
-        // also implicitly subscribes themselves, we should treat the
-        // transaction group as "comment", not "subscribe". In this specific
-        // case (one affected user, and that affected user it the actor),
-        // decrease the action strength.
-
-        if ((count($add) + count($rem)) != 1) {
-          // Not exactly one CC change.
-          break;
+        if ($this->isSelfSubscription()) {
+          // Make this weaker than TYPE_COMMENT.
+          return 0.25;
         }
-
-        $affected_phid = head(array_merge($add, $rem));
-        if ($affected_phid != $this->getAuthorPHID()) {
-          // Affected user is someone else.
-          break;
-        }
-
-        // Make this weaker than TYPE_COMMENT.
-        return 0.25;
+        break;
     }
+
     return 1.0;
   }
 
@@ -1182,6 +1334,35 @@ abstract class PhabricatorApplicationTransaction
     return rtrim($text."\n\n".$body);
   }
 
+  /**
+   * Test if this transaction is just a user subscribing or unsubscribing
+   * themselves.
+   */
+  private function isSelfSubscription() {
+    $type = $this->getTransactionType();
+    if ($type != PhabricatorTransactions::TYPE_SUBSCRIBERS) {
+      return false;
+    }
+
+    $old = $this->getOldValue();
+    $new = $this->getNewValue();
+
+    $add = array_diff($old, $new);
+    $rem = array_diff($new, $old);
+
+    if ((count($add) + count($rem)) != 1) {
+      // More than one user affected.
+      return false;
+    }
+
+    $affected_phid = head(array_merge($add, $rem));
+    if ($affected_phid != $this->getAuthorPHID()) {
+      // Affected user is someone else.
+      return false;
+    }
+
+    return true;
+  }
 
 
 /* -(  PhabricatorPolicyInterface Implementation  )-------------------------- */

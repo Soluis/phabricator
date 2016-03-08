@@ -9,24 +9,32 @@
 }
 
 .phabricator-chromeless-page .phabricator-standard-page {
-  background:           transparent;
-  border-width:         0px;
+  background: transparent;
+  border-width: 0px;
+}
+
+.phabricator-standard-page-body {
+  clear: both;
 }
 
 .phabricator-standard-page-footer {
   text-align: right;
-  margin: 4px 16px;
+  margin: 44px 16px 16px;
   padding: 12px 0;
-  border-top: 1px solid {$lightgreyborder};
+  border-top: 1px solid rgba({$alphagrey},.1);
   color: {$greytext};
+}
+
+.device .phabricator-standard-page-footer {
+  margin: 24px 8px 16px;
+}
+
+!print .phabricator-standard-page-footer {
+  display: none;
 }
 
 .device-desktop .has-local-nav + .phabricator-standard-page-footer {
   margin-left: 221px;
-}
-
-.device-desktop div.phabricator-icon-nav + .phabricator-standard-page-footer {
-  margin-left: 58px;
 }
 
 .device .phabricator-side-menu-home + .phabricator-standard-page-footer {
@@ -56,18 +64,6 @@
   background: #ffffd3;
   position: absolute;
   border: 1px solid #999900;
-}
-
-.workflow-header {
-  background: #efefef;
-  padding: 6px 2em;
-  text-align: right;
-  margin-bottom: 6px;
-  border-bottom: 1px solid #dfdfdf;
-}
-
-.workflow-header button {
-  float: right;
 }
 
 a.handle-status-closed {
@@ -106,8 +102,7 @@ a.handle-availability-disabled {
   background: #aa0000;
   color: white;
   text-align: center;
-  font-size: 11px;
-  font-family: "Verdana";
+  font-size: {$smallerfontsize};
 }
 
 .setup-warning-callout {
@@ -139,18 +134,6 @@ a.handle-availability-disabled {
   bottom: 0;
   left: 0;
   right: 0;
-}
-
-/* Fixes so pages actually print when magic scrollbar is present */
-!print .main-page-frame {
-  position: static;
-  overflow: visible;
-}
-
-!print .jx-scrollbar-viewport {
-  position: static;
-  width: auto !important;
-  height: auto !important;
 }
 
 .jx-scrollbar-test {

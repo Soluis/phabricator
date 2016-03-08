@@ -59,8 +59,8 @@ return array(
     'phabricator-file-upload',
     'javelin-behavior-global-drag-and-drop',
     'javelin-behavior-phabricator-reveal-content',
-    'phabricator-hovercard',
-    'javelin-behavior-phabricator-hovercards',
+    'phui-hovercard',
+    'javelin-behavior-phui-hovercards',
     'javelin-color',
     'javelin-fx',
     'phabricator-draggable-list',
@@ -96,12 +96,10 @@ return array(
 
     'phabricator-remarkup-css',
     'syntax-highlighting-css',
-    'aphront-pager-view-css',
+    'phui-pager-css',
     'aphront-tooltip-css',
     'phabricator-flag-css',
     'phui-info-view-css',
-
-    'sprite-gradient-css',
     'sprite-menu-css',
 
     'phabricator-main-menu-view',
@@ -118,6 +116,7 @@ return array(
     'phui-spacing-css',
     'phui-form-css',
     'phui-icon-view-css',
+    'phui-profile-menu-css',
 
     'phabricator-application-launch-view-css',
     'phabricator-action-list-view-css',
@@ -127,7 +126,6 @@ return array(
 
     'font-fontawesome',
     'phui-font-icon-base-css',
-    'sprite-main-header-css',
     'phui-box-css',
     'phui-object-box-css',
     'phui-timeline-view-css',
@@ -139,13 +137,11 @@ return array(
     'phabricator-feed-css',
     'phabricator-dashboard-css',
     'aphront-multi-column-view-css',
-    'phui-action-header-view-css',
     'conpherence-durable-column-view',
   ),
   'differential.pkg.css' => array(
     'differential-core-view-css',
     'differential-changeset-view-css',
-    'differential-results-table-css',
     'differential-revision-history-css',
     'differential-revision-list-css',
     'differential-table-of-contents-css',
@@ -192,9 +188,6 @@ return array(
   ),
   'maniphest.pkg.js' => array(
     'javelin-behavior-maniphest-batch-selector',
-    'javelin-behavior-maniphest-transaction-controls',
-    'javelin-behavior-maniphest-transaction-preview',
-    'javelin-behavior-maniphest-transaction-expand',
     'javelin-behavior-maniphest-subpriority-editor',
     'javelin-behavior-maniphest-list-editor',
   ),

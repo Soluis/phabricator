@@ -24,7 +24,7 @@ final class PhabricatorMainMenuSearchView extends AphrontView {
   }
 
   public function render() {
-    $user = $this->user;
+    $viewer = $this->getViewer();
 
     $target_id = celerity_generate_unique_node_id();
     $search_id = $this->getID();
@@ -86,7 +86,7 @@ final class PhabricatorMainMenuSearchView extends AphrontView {
     $selector = $this->buildModeSelector($selector_id, $application_id);
 
     $form = phabricator_form(
-      $user,
+      $viewer,
       array(
         'action' => '/search/',
         'method' => 'POST',
@@ -109,7 +109,7 @@ final class PhabricatorMainMenuSearchView extends AphrontView {
   }
 
   private function buildModeSelector($selector_id, $application_id) {
-    $viewer = $this->getUser();
+    $viewer = $this->getViewer();
 
     $items = array();
     $items[] = array(
@@ -128,7 +128,7 @@ final class PhabricatorMainMenuSearchView extends AphrontView {
     if ($application) {
       $application_value = get_class($application);
       if ($application->getApplicationSearchDocumentTypes()) {
-        $application_icon = $application->getFontIcon();
+        $application_icon = $application->getIcon();
       }
     }
 
@@ -203,7 +203,7 @@ final class PhabricatorMainMenuSearchView extends AphrontView {
       ->setIcon(
         id(new PHUIIconView())
           ->addSigil('global-search-dropdown-icon')
-          ->setIconFont($current_icon))
+          ->setIcon($current_icon))
       ->setDropdown(true);
 
     $input = javelin_tag(

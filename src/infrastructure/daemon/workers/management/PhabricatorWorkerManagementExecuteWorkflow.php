@@ -42,10 +42,12 @@ final class PhabricatorWorkerManagementExecuteWorkflow
         $task->getDataID());
       $task->setData($task_data->getData());
 
-      $id = $task->getID();
-      $class = $task->getTaskClass();
-
-      $console->writeOut("Executing task {$id} ({$class})...");
+      echo tsprintf(
+        "%s\n",
+        pht(
+          'Executing task %d (%s)...',
+          $task->getID(),
+          $task->getTaskClass()));
 
       $task = $task->executeTask();
       $ex = $task->getExecutionException();

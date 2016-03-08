@@ -1,6 +1,6 @@
 <?php
 
-final class PhortuneCreditCardForm {
+final class PhortuneCreditCardForm extends Phobject {
 
   private $formID;
   private $scripts = array();
@@ -107,7 +107,7 @@ final class PhortuneCreditCardForm {
         ),
         array(
           id(new PHUIIconView())
-            ->setIconFont('fa-lock grey'),
+            ->setIcon('fa-lock grey'),
           ' ',
           $assurance,
         ));

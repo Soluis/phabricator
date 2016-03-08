@@ -115,11 +115,9 @@ final class PhabricatorApplicationEmailCommandsController
     $crumbs = $this->buildApplicationCrumbs();
     $this->addApplicationCrumb($crumbs, $selected);
     $crumbs->addTextCrumb($title);
+    $crumbs->setBorder(true);
 
-    $content_box = PhabricatorMarkupEngine::renderOneObject(
-      id(new PhabricatorMarkupOneOff())->setContent($content),
-      'default',
-      $viewer);
+    $content_box = new PHUIRemarkupView($viewer, $content);
 
     $info_view = null;
     if (!PhabricatorEnv::getEnvConfig('metamta.reply-handler-domain')) {
@@ -134,9 +132,8 @@ final class PhabricatorApplicationEmailCommandsController
     $header = id(new PHUIHeaderView())
       ->setHeader($title);
 
-    $document = id(new PHUIDocumentView())
+    $document = id(new PHUIDocumentViewPro())
       ->setHeader($header)
-      ->setFontKit(PHUIDocumentView::FONT_SOURCE_SANS)
       ->appendChild($info_view)
       ->appendChild($content_box);
 

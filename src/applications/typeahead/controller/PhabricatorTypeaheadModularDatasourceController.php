@@ -29,9 +29,10 @@ final class PhabricatorTypeaheadModularDatasourceController
     // This makes form submission easier in the debug view.
     $class = nonempty($request->getURIData('class'), $request->getStr('class'));
 
-    $sources = id(new PhutilSymbolLoader())
+    $sources = id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorTypeaheadDatasource')
-      ->loadObjects();
+      ->execute();
+
     if (isset($sources[$class])) {
       $source = $sources[$class];
       $source->setParameters($request->getRequestData());
@@ -106,6 +107,8 @@ final class PhabricatorTypeaheadModularDatasourceController
           if (($offset + (2 * $limit)) < $hard_limit) {
             $next_uri = id(new PhutilURI($request->getRequestURI()))
               ->setQueryParam('offset', $offset + $limit)
+              ->setQueryParam('q', $query)
+              ->setQueryParam('raw', $raw_query)
               ->setQueryParam('format', 'html');
 
             $next_link = javelin_tag(
@@ -236,7 +239,7 @@ final class PhabricatorTypeaheadModularDatasourceController
 
           $function_help = array(
             id(new PHUIIconView())
-              ->setIconFont('fa-book'),
+              ->setIcon('fa-book'),
             ' ',
             $reference_link,
           );

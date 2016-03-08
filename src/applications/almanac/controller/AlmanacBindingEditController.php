@@ -87,7 +87,7 @@ final class AlmanacBindingEditController
       ->appendControl(
         id(new AphrontFormTokenizerControl())
           ->setName('interfacePHIDs')
-          ->setLabel('Interface')
+          ->setLabel(pht('Interface'))
           ->setLimit(1)
           ->setDatasource(new AlmanacInterfaceDatasource())
           ->setValue($v_interface)
@@ -110,14 +110,14 @@ final class AlmanacBindingEditController
       $crumbs->addTextCrumb(pht('Edit Binding'));
     }
 
-    return $this->buildApplicationPage(
-      array(
-        $crumbs,
-        $box,
-      ),
-      array(
-        'title' => $title,
+    return $this->newPage()
+      ->setTitle($title)
+      ->setCrumbs($crumbs)
+      ->appendChild(
+        array(
+          $box,
       ));
+
   }
 
 }

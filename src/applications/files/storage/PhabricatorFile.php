@@ -542,7 +542,7 @@ final class PhabricatorFile extends PhabricatorFileDAO
           // just bail out.
           throw $status;
         } else {
-          // This is HTTP 2XX, so use the the response body to save the
+          // This is HTTP 2XX, so use the response body to save the
           // file data.
           $params = $params + array(
             'name' => basename($uri),
@@ -557,7 +557,7 @@ final class PhabricatorFile extends PhabricatorFileDAO
               'Failed to fetch remote URI "%s" after following %s redirect(s) '.
               '(%s): %s',
               $uri,
-              new PhutilNumber(count($redirects)),
+              phutil_count($redirects),
               implode(' > ', array_keys($redirects)),
               $ex->getMessage()),
             $ex);
@@ -882,18 +882,9 @@ final class PhabricatorFile extends PhabricatorFileDAO
   }
 
   public static function buildAllEngines() {
-    $engines = id(new PhutilSymbolLoader())
-      ->setType('class')
-      ->setConcreteOnly(true)
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorFileStorageEngine')
-      ->selectAndLoadSymbols();
-
-    $results = array();
-    foreach ($engines as $engine_class) {
-      $results[] = newv($engine_class['name'], array());
-    }
-
-    return $results;
+      ->execute();
   }
 
   public function getViewableMimeType() {
@@ -970,16 +961,18 @@ final class PhabricatorFile extends PhabricatorFileDAO
    * Builtins are located in `resources/builtin/` and identified by their
    * name.
    *
-   * @param  PhabricatorUser                Viewing user.
-   * @param  list<string>                   List of builtin file names.
-   * @return dict<string, PhabricatorFile>  Dictionary of named builtins.
+   * @param  PhabricatorUser Viewing user.
+   * @param  list<PhabricatorFilesBuiltinFile> List of builtin file specs.
+   * @return dict<string, PhabricatorFile> Dictionary of named builtins.
    */
-  public static function loadBuiltins(PhabricatorUser $user, array $names) {
+  public static function loadBuiltins(PhabricatorUser $user, array $builtins) {
+    $builtins = mpull($builtins, null, 'getBuiltinFileKey');
+
     $specs = array();
-    foreach ($names as $name) {
+    foreach ($builtins as $key => $buitin) {
       $specs[] = array(
         'originalPHID' => PhabricatorPHIDConstants::PHID_VOID,
-        'transform'    => 'builtin:'.$name,
+        'transform'    => $key,
       );
     }
 
@@ -990,41 +983,34 @@ final class PhabricatorFile extends PhabricatorFileDAO
       ->withTransforms($specs)
       ->execute();
 
-    $files = mpull($files, null, 'getName');
-
-    $root = dirname(phutil_get_library_root('phabricator'));
-    $root = $root.'/resources/builtin/';
+    $results = array();
+    foreach ($files as $file) {
+      $builtin_key = $file->getBuiltinName();
+      if ($builtin_key !== null) {
+        $results[$builtin_key] = $file;
+      }
+    }
 
     $build = array();
-    foreach ($names as $name) {
-      if (isset($files[$name])) {
+    foreach ($builtins as $key => $builtin) {
+      if (isset($results[$key])) {
         continue;
       }
 
-      // This is just a sanity check to prevent loading arbitrary files.
-      if (basename($name) != $name) {
-        throw new Exception(pht("Invalid builtin name '%s'!", $name));
-      }
+      $data = $builtin->loadBuiltinFileData();
 
-      $path = $root.$name;
-
-      if (!Filesystem::pathExists($path)) {
-        throw new Exception(pht("Builtin '%s' does not exist!", $path));
-      }
-
-      $data = Filesystem::readFile($path);
       $params = array(
-        'name' => $name,
+        'name' => $builtin->getBuiltinDisplayName(),
         'ttl'  => time() + (60 * 60 * 24 * 7),
         'canCDN' => true,
-        'builtin' => $name,
+        'builtin' => $key,
       );
 
       $unguarded = AphrontWriteGuard::beginScopedUnguardedWrites();
         $file = self::newFromFileData($data, $params);
         $xform = id(new PhabricatorTransformedFile())
           ->setOriginalPHID(PhabricatorPHIDConstants::PHID_VOID)
-          ->setTransform('builtin:'.$name)
+          ->setTransform($key)
           ->setTransformedPHID($file->getPHID())
           ->save();
       unset($unguarded);
@@ -1032,10 +1018,10 @@ final class PhabricatorFile extends PhabricatorFileDAO
       $file->attachObjectPHIDs(array());
       $file->attachObjects(array());
 
-      $files[$name] = $file;
+      $results[$key] = $file;
     }
 
-    return $files;
+    return $results;
   }
 
 
@@ -1047,7 +1033,12 @@ final class PhabricatorFile extends PhabricatorFileDAO
    * @return PhabricatorFile  Corresponding builtin file.
    */
   public static function loadBuiltin(PhabricatorUser $user, $name) {
-    return idx(self::loadBuiltins($user, array($name)), $name);
+    $builtin = id(new PhabricatorFilesOnDiskBuiltinFile())
+      ->setName($name);
+
+    $key = $builtin->getBuiltinFileKey();
+
+    return idx(self::loadBuiltins($user, array($builtin)), $key);
   }
 
   public function getObjects() {
@@ -1355,14 +1346,6 @@ final class PhabricatorFile extends PhabricatorFileDAO
 
   public function isAutomaticallySubscribed($phid) {
     return ($this->authorPHID == $phid);
-  }
-
-  public function shouldShowSubscribersProperty() {
-    return true;
-  }
-
-  public function shouldAllowSubscription($phid) {
-    return true;
   }
 
 

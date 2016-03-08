@@ -2,9 +2,8 @@
 
 final class PhortuneAccountListController extends PhortuneController {
 
-  public function processRequest() {
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
+  public function handleRequest(AphrontRequest $request) {
+    $viewer = $request->getViewer();
 
     $accounts = id(new PhortuneAccountQuery())
       ->setViewer($viewer)
@@ -27,7 +26,6 @@ final class PhortuneAccountListController extends PhortuneController {
     $crumbs->addTextCrumb(pht('Accounts'));
 
     $payment_list = id(new PHUIObjectItemListView())
-      ->setStackable(true)
       ->setUser($viewer)
       ->setNoDataString(
         pht(
@@ -50,17 +48,14 @@ final class PhortuneAccountListController extends PhortuneController {
         id(new PHUIButtonView())
           ->setTag('a')
           ->setHref($this->getApplicationURI('account/edit/'))
-          ->setIcon(
-            id(new PHUIIconView())
-              ->setIconFont('fa-plus'))
+          ->setIcon('fa-plus')
           ->setText(pht('Create Account')));
 
     $payment_box = id(new PHUIObjectBoxView())
       ->setHeader($payment_header)
-      ->appendChild($payment_list);
+      ->setObjectList($payment_list);
 
     $merchant_list = id(new PHUIObjectItemListView())
-      ->setStackable(true)
       ->setUser($viewer)
       ->setNoDataString(
         pht(
@@ -83,14 +78,12 @@ final class PhortuneAccountListController extends PhortuneController {
         id(new PHUIButtonView())
           ->setTag('a')
           ->setHref($this->getApplicationURI('merchant/'))
-          ->setIcon(
-            id(new PHUIIconView())
-              ->setIconFont('fa-list'))
+          ->setIcon('fa-list')
           ->setText(pht('View All Merchants')));
 
     $merchant_box = id(new PHUIObjectBoxView())
       ->setHeader($merchant_header)
-      ->appendChild($merchant_list);
+      ->setObjectList($merchant_list);
 
     return $this->buildApplicationPage(
       array(

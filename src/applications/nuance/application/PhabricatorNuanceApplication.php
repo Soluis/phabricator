@@ -6,7 +6,7 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
     return pht('Nuance');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-fax';
   }
 
@@ -38,19 +38,23 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
   public function getRoutes() {
     return array(
       '/nuance/' => array(
+        '' => 'NuanceConsoleController',
         'item/' => array(
           'view/(?P<id>[1-9]\d*)/' => 'NuanceItemViewController',
           'edit/(?P<id>[1-9]\d*)/' => 'NuanceItemEditController',
           'new/'                   => 'NuanceItemEditController',
         ),
         'source/' => array(
+          $this->getQueryRoutePattern() => 'NuanceSourceListController',
           'view/(?P<id>[1-9]\d*)/' => 'NuanceSourceViewController',
           'edit/(?P<id>[1-9]\d*)/' => 'NuanceSourceEditController',
-          'new/'                   => 'NuanceSourceEditController',
+          'new/(?P<type>[^/]+)/'   => 'NuanceSourceEditController',
+          'create/' => 'NuanceSourceCreateController',
         ),
         'queue/' => array(
+          $this->getQueryRoutePattern() => 'NuanceQueueListController',
+          $this->getEditRoutePattern('edit/') => 'NuanceQueueEditController',
           'view/(?P<id>[1-9]\d*)/' => 'NuanceQueueViewController',
-          'edit/(?P<id>[1-9]\d*)/' => 'NuanceQueueEditController',
           'new/'                   => 'NuanceQueueEditController',
         ),
         'requestor/' => array(
@@ -59,6 +63,9 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
           'new/'                   => 'NuanceRequestorEditController',
         ),
       ),
+      '/action/' => array(
+        '(?P<id>[1-9]\d*)/(?P<path>.*)' => 'NuanceSourceActionController',
+      ),
     );
   }
 
@@ -66,9 +73,13 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
     return array(
       NuanceSourceDefaultViewCapability::CAPABILITY => array(
         'caption' => pht('Default view policy for newly created sources.'),
+        'template' => NuanceSourcePHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_VIEW,
       ),
       NuanceSourceDefaultEditCapability::CAPABILITY => array(
         'caption' => pht('Default edit policy for newly created sources.'),
+        'template' => NuanceSourcePHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_EDIT,
       ),
       NuanceSourceManageCapability::CAPABILITY => array(),
     );

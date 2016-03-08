@@ -1,6 +1,6 @@
 <?php
 
-final class MultimeterControl {
+final class MultimeterControl extends Phobject {
 
   private static $instance;
 
@@ -265,6 +265,7 @@ final class MultimeterControl {
         'init' => true,
         'diff' => true,
         'cat' => true,
+        'files' => true,
       ),
       'svnadmin' => array(
         'create' => true,

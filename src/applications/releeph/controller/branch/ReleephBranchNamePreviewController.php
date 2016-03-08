@@ -3,8 +3,7 @@
 final class ReleephBranchNamePreviewController
   extends ReleephController {
 
-  public function processRequest() {
-    $request = $this->getRequest();
+  public function handleRequest(AphrontRequest $request) {
 
     $is_symbolic = $request->getBool('isSymbolic');
     $template = $request->getStr('template');
@@ -13,10 +12,10 @@ final class ReleephBranchNamePreviewController
       $template = ReleephBranchTemplate::getDefaultTemplate();
     }
 
-    $arc_project_id = $request->getInt('arcProjectID');
+    $repository_phid = $request->getInt('repositoryPHID');
     $fake_commit_handle =
       ReleephBranchTemplate::getFakeCommitHandleFor(
-        $arc_project_id,
+        $repository_phid,
         $request->getUser());
 
     list($name, $errors) = id(new ReleephBranchTemplate())

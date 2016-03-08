@@ -3,7 +3,11 @@
 final class PhabricatorPholioMockTestDataGenerator
   extends PhabricatorTestDataGenerator {
 
-  public function generate() {
+  public function getGeneratorName() {
+    return pht('Pholio Mocks');
+  }
+
+  public function generateObject() {
     $author_phid = $this->loadPhabrictorUserPHID();
     $author = id(new PhabricatorUser())
           ->loadOneWhere('phid = %s', $author_phid);
@@ -17,9 +21,9 @@ final class PhabricatorPholioMockTestDataGenerator
 
     // Accumulate Transactions
     $changes = array();
-    $changes[PholioTransactionType::TYPE_NAME] =
+    $changes[PholioTransaction::TYPE_NAME] =
       $this->generateTitle();
-    $changes[PholioTransactionType::TYPE_DESCRIPTION] =
+    $changes[PholioTransaction::TYPE_DESCRIPTION] =
       $this->generateDescription();
     $changes[PhabricatorTransactions::TYPE_VIEW_POLICY] =
       PhabricatorPolicies::POLICY_PUBLIC;
@@ -92,7 +96,11 @@ final class PhabricatorPholioMockTestDataGenerator
     $quantity = min($quantity, count($images));
 
     if ($quantity) {
-      foreach (array_rand($images, $quantity) as $random) {
+      $random_images = $quantity === 1 ?
+        array(array_rand($images, $quantity)) :
+        array_rand($images, $quantity);
+
+      foreach ($random_images as $random) {
         $rand_images[] = $images[$random]->getPHID();
       }
     }

@@ -7,18 +7,9 @@ final class PhabricatorConduitAPIController
     return false;
   }
 
-  private $method;
-
-  public function willProcessRequest(array $data) {
-    $this->method = $data['method'];
-    return $this;
-  }
-
-  public function processRequest() {
+  public function handleRequest(AphrontRequest $request) {
+    $method = $request->getURIData('method');
     $time_start = microtime(true);
-    $request = $this->getRequest();
-
-    $method = $this->method;
 
     $api_request = null;
     $method_implementation = null;
@@ -55,14 +46,10 @@ final class PhabricatorConduitAPIController
       $conduit_username = '-';
       if ($call->shouldRequireAuthentication()) {
         $metadata['scope'] = $call->getRequiredScope();
-        $auth_error = $this->authenticateUser($api_request, $metadata);
+        $auth_error = $this->authenticateUser($api_request, $metadata, $method);
         // If we've explicitly authenticated the user here and either done
         // CSRF validation or are using a non-web authentication mechanism.
         $allow_unguarded_writes = true;
-
-        if (isset($metadata['actAsUser'])) {
-          $this->actAsUser($api_request, $metadata['actAsUser']);
-        }
 
         if ($auth_error === null) {
           $conduit_user = $api_request->getUser();
@@ -123,19 +110,11 @@ final class PhabricatorConduitAPIController
 
     $time_end = microtime(true);
 
-    $connection_id = null;
-    if (idx($metadata, 'connectionID')) {
-      $connection_id = $metadata['connectionID'];
-    } else if (($method == 'conduit.connect') && $result) {
-      $connection_id = idx($result, 'connectionID');
-    }
-
     $log
       ->setCallerPHID(
         isset($conduit_user)
           ? $conduit_user->getPHID()
           : null)
-      ->setConnectionID($connection_id)
       ->setError((string)$error_code)
       ->setDuration(1000000 * ($time_end - $time_start));
 
@@ -164,44 +143,6 @@ final class PhabricatorConduitAPIController
   }
 
   /**
-   * Change the api request user to the user that we want to act as.
-   * Only admins can use actAsUser
-   *
-   * @param   ConduitAPIRequest Request being executed.
-   * @param   string            The username of the user we want to act as
-   */
-  private function actAsUser(
-    ConduitAPIRequest $api_request,
-    $user_name) {
-
-    $config_key = 'security.allow-conduit-act-as-user';
-    if (!PhabricatorEnv::getEnvConfig($config_key)) {
-      throw new Exception(pht('%s is disabled.', $config_key));
-    }
-
-    if (!$api_request->getUser()->getIsAdmin()) {
-      throw new Exception(
-        pht(
-          'Only administrators can use %s.',
-          __FUNCTION__));
-    }
-
-    $user = id(new PhabricatorUser())->loadOneWhere(
-      'userName = %s',
-      $user_name);
-
-    if (!$user) {
-      throw new Exception(
-        pht(
-          "The %s username '%s' is not a valid user.",
-          __FUNCTION__,
-          $user_name));
-    }
-
-    $api_request->setUser($user);
-  }
-
-  /**
    * Authenticate the client making the request to a Phabricator user account.
    *
    * @param   ConduitAPIRequest Request being executed.
@@ -211,7 +152,8 @@ final class PhabricatorConduitAPIController
    */
   private function authenticateUser(
     ConduitAPIRequest $api_request,
-    array $metadata) {
+    array $metadata,
+    $method) {
 
     $request = $this->getRequest();
 
@@ -249,7 +191,7 @@ final class PhabricatorConduitAPIController
         unset($protocol_data['scope']);
 
         ConduitClient::verifySignature(
-          $this->method,
+          $method,
           $api_request->getAllParameters(),
           $protocol_data,
           $ssl_public_key);
@@ -476,7 +418,8 @@ final class PhabricatorConduitAPIController
       $token = idx($metadata, 'authToken');
       $signature = idx($metadata, 'authSignature');
       $certificate = $user->getConduitCertificate();
-      if (sha1($token.$certificate) !== $signature) {
+      $hash = sha1($token.$certificate);
+      if (!phutil_hashes_are_identical($hash, $signature)) {
         return array(
           'ERR-INVALID-AUTH',
           pht('Authentication is invalid.'),
@@ -517,10 +460,10 @@ final class PhabricatorConduitAPIController
     ConduitAPIRequest $request,
     PhabricatorUser $user) {
 
-    if (!$user->isUserActivated()) {
+    if (!$user->canEstablishAPISessions()) {
       return array(
-        'ERR-USER-DISABLED',
-        pht('User account is not activated.'),
+        'ERR-INVALID-AUTH',
+        pht('User account is not permitted to use the API.'),
       );
     }
 
@@ -569,11 +512,11 @@ final class PhabricatorConduitAPIController
 
     $param_panel = new PHUIObjectBoxView();
     $param_panel->setHeaderText(pht('Method Parameters'));
-    $param_panel->appendChild($param_table);
+    $param_panel->setTable($param_table);
 
     $result_panel = new PHUIObjectBoxView();
     $result_panel->setHeaderText(pht('Method Result'));
-    $result_panel->appendChild($result_table);
+    $result_panel->setTable($result_table);
 
     $method_uri = $this->getApplicationURI('method/'.$method.'/');
 

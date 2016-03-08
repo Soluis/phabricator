@@ -14,7 +14,7 @@ final class PhabricatorFundApplication extends PhabricatorApplication {
     return pht('Donate');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-heart';
   }
 
@@ -55,6 +55,7 @@ final class PhabricatorFundApplication extends PhabricatorApplication {
     return array(
       FundDefaultViewCapability::CAPABILITY => array(
         'caption' => pht('Default view policy for newly created initiatives.'),
+        'tempate' => FundInitiativePHIDType::TYPECONST,
       ),
       FundCreateInitiativesCapability::CAPABILITY => array(
         'default' => PhabricatorPolicies::POLICY_ADMIN,

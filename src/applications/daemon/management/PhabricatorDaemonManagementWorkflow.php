@@ -5,20 +5,19 @@ abstract class PhabricatorDaemonManagementWorkflow
 
   private $runDaemonsAsUser = null;
 
-  protected final function loadAvailableDaemonClasses() {
-    $loader = new PhutilSymbolLoader();
-    return $loader
+  final protected function loadAvailableDaemonClasses() {
+    return id(new PhutilSymbolLoader())
       ->setAncestorClass('PhutilDaemon')
       ->setConcreteOnly(true)
       ->selectSymbolsWithoutLoading();
   }
 
-  protected final function getPIDDirectory() {
+  final protected function getPIDDirectory() {
     $path = PhabricatorEnv::getEnvConfig('phd.pid-directory');
     return $this->getControlDirectory($path);
   }
 
-  protected final function getLogDirectory() {
+  final protected function getLogDirectory() {
     $path = PhabricatorEnv::getEnvConfig('phd.log-directory');
     return $this->getControlDirectory($path);
   }
@@ -42,7 +41,7 @@ abstract class PhabricatorDaemonManagementWorkflow
     return $path;
   }
 
-  protected final function loadRunningDaemons() {
+  final protected function loadRunningDaemons() {
     $daemons = array();
 
     $pid_dir = $this->getPIDDirectory();
@@ -56,7 +55,7 @@ abstract class PhabricatorDaemonManagementWorkflow
     return array_mergev($daemons);
   }
 
-  protected final function loadAllRunningDaemons() {
+  final protected function loadAllRunningDaemons() {
     $local_daemons = $this->loadRunningDaemons();
 
     $local_ids = array();
@@ -114,7 +113,7 @@ abstract class PhabricatorDaemonManagementWorkflow
     return head($match);
   }
 
-  protected final function launchDaemons(
+  final protected function launchDaemons(
     array $daemons,
     $debug,
     $run_as_current_user = false) {
@@ -159,8 +158,10 @@ abstract class PhabricatorDaemonManagementWorkflow
 
     $this->printLaunchingDaemons($daemons, $debug);
 
+    $trace = PhutilArgumentParser::isTraceModeEnabled();
+
     $flags = array();
-    if ($debug || PhabricatorEnv::getEnvConfig('phd.trace')) {
+    if ($trace || PhabricatorEnv::getEnvConfig('phd.trace')) {
       $flags[] = '--trace';
     }
 
@@ -227,7 +228,9 @@ abstract class PhabricatorDaemonManagementWorkflow
         // Retry without sudo
         $console->writeOut(
           "%s\n",
-          pht('sudo command failed. Starting daemon as current user.'));
+          pht(
+            '%s command failed. Starting daemon as current user.',
+            'sudo'));
         $this->executeDaemonLaunchCommand(
           $command,
           $daemon_script_dir,
@@ -266,8 +269,9 @@ abstract class PhabricatorDaemonManagementWorkflow
       if (preg_match('/sudo: a password is required/', $stderr)) {
         throw new Exception(
           pht(
-            'sudo exited with a zero exit code, but emitted output '.
-            'consistent with failure under OSX.'));
+            '%s exited with a zero exit code, but emitted output '.
+            'consistent with failure under OSX.',
+            'sudo'));
       }
     }
   }
@@ -307,7 +311,7 @@ abstract class PhabricatorDaemonManagementWorkflow
 /* -(  Commands  )----------------------------------------------------------- */
 
 
-  protected final function executeStartCommand(array $options) {
+  final protected function executeStartCommand(array $options) {
     PhutilTypeSpec::checkMap(
       $options,
       array(
@@ -377,7 +381,7 @@ abstract class PhabricatorDaemonManagementWorkflow
     return 0;
   }
 
-  protected final function executeStopCommand(
+  final protected function executeStopCommand(
     array $pids,
     array $options) {
 
@@ -454,7 +458,7 @@ abstract class PhabricatorDaemonManagementWorkflow
     return 0;
   }
 
-  protected final function executeReloadCommand(array $pids) {
+  final protected function executeReloadCommand(array $pids) {
     $console = PhutilConsole::getConsole();
 
     $daemons = $this->loadRunningDaemons();

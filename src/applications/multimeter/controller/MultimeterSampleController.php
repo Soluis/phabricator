@@ -90,7 +90,7 @@ final class MultimeterSampleController extends MultimeterController {
         $events_col = $this->renderGroupingLink(
           $group,
           'id',
-          pht('%s Events', new PhutilNumber($row['N'])));
+          pht('%s Event(s)', new PhutilNumber($row['N'])));
       }
 
       if (isset($group['request'])) {
@@ -235,7 +235,7 @@ final class MultimeterSampleController extends MultimeterController {
           'Samples (%s - %s)',
           phabricator_datetime($ago, $viewer),
           phabricator_datetime($now, $viewer)))
-      ->appendChild($table);
+      ->setTable($table);
 
     $crumbs = $this->buildApplicationCrumbs();
     $crumbs->addTextCrumb(

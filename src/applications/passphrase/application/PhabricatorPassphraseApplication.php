@@ -14,7 +14,7 @@ final class PhabricatorPassphraseApplication extends PhabricatorApplication {
     return pht('Credential Store');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-user-secret';
   }
 
@@ -60,6 +60,26 @@ final class PhabricatorPassphraseApplication extends PhabricatorApplication {
   public function getApplicationSearchDocumentTypes() {
     return array(
       PassphraseCredentialPHIDType::TYPECONST,
+    );
+  }
+
+  protected function getCustomCapabilities() {
+    $policy_key = id(new PassphraseCredentialAuthorPolicyRule())
+      ->getObjectPolicyFullKey();
+
+    return array(
+      PassphraseDefaultViewCapability::CAPABILITY => array(
+        'caption' => pht('Default view policy for newly created credentials.'),
+        'template' => PassphraseCredentialPHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_VIEW,
+        'default' => $policy_key,
+      ),
+      PassphraseDefaultEditCapability::CAPABILITY => array(
+        'caption' => pht('Default edit policy for newly created credentials.'),
+        'template' => PassphraseCredentialPHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_EDIT,
+        'default' => $policy_key,
+      ),
     );
   }
 

@@ -3,7 +3,8 @@
 final class PhabricatorNotificationStatusController
   extends PhabricatorNotificationController {
 
-  public function processRequest() {
+  public function handleRequest(AphrontRequest $request) {
+
     try {
       $status = PhabricatorNotificationClient::getServerStatus();
       $status = $this->renderServerStatus($status);
@@ -62,7 +63,7 @@ final class PhabricatorNotificationStatusController
       ));
 
     $test_icon = id(new PHUIIconView())
-      ->setIconFont('fa-exclamation-triangle');
+      ->setIcon('fa-exclamation-triangle');
 
     $test_button = id(new PHUIButtonView())
         ->setTag('a')

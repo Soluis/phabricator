@@ -4,7 +4,7 @@
  * @task config     Configuring Repository Engines
  * @task internal   Internals
  */
-abstract class PhabricatorRepositoryEngine {
+abstract class PhabricatorRepositoryEngine extends Phobject {
 
   private $repository;
   private $verbose;
@@ -62,13 +62,29 @@ abstract class PhabricatorRepositoryEngine {
    * @return  void
    */
   protected function verifyGitOrigin(PhabricatorRepository $repository) {
-    list($remotes) = $repository->execxLocalCommand(
-      'remote show -n origin');
+    try {
+      list($remotes) = $repository->execxLocalCommand(
+        'remote show -n origin');
+    } catch (CommandException $ex) {
+      throw new PhutilProxyException(
+        pht(
+          'Expected to find a Git working copy at path "%s", but the '.
+          'path exists and is not a valid working copy. If you remove '.
+          'this directory, the daemons will automatically recreate it '.
+          'correctly. Phabricator will not destroy the directory for you '.
+          'because it can not be sure that it does not contain important '.
+          'data.',
+          $repository->getLocalPath()),
+        $ex);
+    }
 
     $matches = null;
     if (!preg_match('/^\s*Fetch URL:\s*(.*?)\s*$/m', $remotes, $matches)) {
       throw new Exception(
-        "Expected 'Fetch URL' in 'git remote show -n origin'.");
+        pht(
+          "Expected '%s' in '%s'.",
+          'Fetch URL',
+          'git remote show -n origin'));
     }
 
     $remote_uri = $matches[1];

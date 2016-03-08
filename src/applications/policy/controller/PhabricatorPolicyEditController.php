@@ -4,17 +4,59 @@ final class PhabricatorPolicyEditController
   extends PhabricatorPolicyController {
 
   public function handleRequest(AphrontRequest $request) {
-    $request = $this->getRequest();
-    $viewer = $request->getUser();
+    $viewer = $this->getViewer();
+
+    $object_phid = $request->getURIData('objectPHID');
+    if ($object_phid) {
+      $object = id(new PhabricatorObjectQuery())
+        ->setViewer($viewer)
+        ->withPHIDs(array($object_phid))
+        ->executeOne();
+      if (!$object) {
+        return new Aphront404Response();
+      }
+    } else {
+      $object_type = $request->getURIData('objectType');
+      if (!$object_type) {
+        $object_type = $request->getURIData('templateType');
+      }
+
+      $phid_types = PhabricatorPHIDType::getAllInstalledTypes($viewer);
+      if (empty($phid_types[$object_type])) {
+        return new Aphront404Response();
+      }
+      $object = $phid_types[$object_type]->newObject();
+      if (!$object) {
+        return new Aphront404Response();
+      }
+    }
+
+    $phid = $request->getURIData('phid');
+    switch ($phid) {
+      case AphrontFormPolicyControl::getSelectProjectKey():
+        return $this->handleProjectRequest($request);
+      case AphrontFormPolicyControl::getSelectCustomKey():
+        $phid = null;
+        break;
+      default:
+        break;
+    }
 
     $action_options = array(
       PhabricatorPolicy::ACTION_ALLOW => pht('Allow'),
       PhabricatorPolicy::ACTION_DENY => pht('Deny'),
     );
 
-    $rules = id(new PhutilSymbolLoader())
+    $rules = id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorPolicyRule')
-      ->loadObjects();
+      ->execute();
+
+    foreach ($rules as $key => $rule) {
+      if (!$rule->canApplyToObject($object)) {
+        unset($rules[$key]);
+      }
+    }
+
     $rules = msort($rules, 'getRuleOrder');
 
     $default_rule = array(
@@ -23,7 +65,6 @@ final class PhabricatorPolicyEditController
       'value' => null,
     );
 
-    $phid = $request->getURIData('phid');
     if ($phid) {
       $policies = id(new PhabricatorPolicyQuery())
         ->setViewer($viewer)
@@ -219,6 +260,81 @@ final class PhabricatorPolicyEditController
       ->addCancelButton('#');
 
     return id(new AphrontDialogResponse())->setDialog($dialog);
+  }
+
+  private function handleProjectRequest(AphrontRequest $request) {
+    $viewer = $this->getViewer();
+
+    $errors = array();
+    $e_project = true;
+
+    if ($request->isFormPost()) {
+      $project_phids = $request->getArr('projectPHIDs');
+      $project_phid = head($project_phids);
+
+      $project = id(new PhabricatorObjectQuery())
+        ->setViewer($viewer)
+        ->withPHIDs(array($project_phid))
+        ->executeOne();
+
+      if ($project) {
+        // Save this project as one of the user's most recently used projects,
+        // so we'll show it by default in future menus.
+
+        $pref_key = PhabricatorUserPreferences::PREFERENCE_FAVORITE_POLICIES;
+
+        $preferences = $viewer->loadPreferences();
+        $favorites = $preferences->getPreference($pref_key);
+        if (!is_array($favorites)) {
+          $favorites = array();
+        }
+
+        // Add this, or move it to the end of the list.
+        unset($favorites[$project_phid]);
+        $favorites[$project_phid] = true;
+
+        $preferences->setPreference($pref_key, $favorites);
+        $preferences->save();
+
+        $data = array(
+          'phid' => $project->getPHID(),
+          'info' => array(
+            'name' => $project->getName(),
+            'full' => $project->getName(),
+            'icon' => $project->getDisplayIconIcon(),
+          ),
+        );
+
+        return id(new AphrontAjaxResponse())->setContent($data);
+      } else {
+        $errors[] = pht('You must choose a project.');
+        $e_project = pht('Required');
+      }
+    }
+
+    $project_datasource = id(new PhabricatorProjectDatasource())
+      ->setParameters(
+        array(
+          'policy' => 1,
+        ));
+
+    $form = id(new AphrontFormView())
+      ->setUser($viewer)
+      ->appendControl(
+        id(new AphrontFormTokenizerControl())
+          ->setLabel(pht('Members Of'))
+          ->setName('projectPHIDs')
+          ->setLimit(1)
+          ->setError($e_project)
+          ->setDatasource($project_datasource));
+
+    return $this->newDialog()
+      ->setWidth(AphrontDialogView::WIDTH_FORM)
+      ->setErrors($errors)
+      ->setTitle(pht('Select Project'))
+      ->appendForm($form)
+      ->addSubmitButton(pht('Done'))
+      ->addCancelButton('#');
   }
 
 }

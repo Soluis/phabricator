@@ -14,7 +14,7 @@ final class PhabricatorPholioApplication extends PhabricatorApplication {
     return pht('Review Mocks and Design');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-camera-retro';
   }
 
@@ -44,7 +44,9 @@ final class PhabricatorPholioApplication extends PhabricatorApplication {
       '/pholio/' => array(
         '(?:query/(?P<queryKey>[^/]+)/)?' => 'PholioMockListController',
         'new/'                  => 'PholioMockEditController',
+        'create/'               => 'PholioMockEditController',
         'edit/(?P<id>\d+)/'     => 'PholioMockEditController',
+        'archive/(?P<id>\d+)/'  => 'PholioMockArchiveController',
         'comment/(?P<id>\d+)/'  => 'PholioMockCommentController',
         'inline/' => array(
           '(?:(?P<id>\d+)/)?' => 'PholioInlineController',
@@ -63,7 +65,7 @@ final class PhabricatorPholioApplication extends PhabricatorApplication {
     $item = id(new PHUIListItemView())
       ->setName(pht('Pholio Mock'))
       ->setIcon('fa-picture-o')
-      ->setHref($this->getBaseURI().'new/');
+      ->setHref($this->getBaseURI().'create/');
     $items[] = $item;
 
     return $items;
@@ -71,8 +73,14 @@ final class PhabricatorPholioApplication extends PhabricatorApplication {
 
   protected function getCustomCapabilities() {
     return array(
-      PholioDefaultViewCapability::CAPABILITY => array(),
-      PholioDefaultEditCapability::CAPABILITY => array(),
+      PholioDefaultViewCapability::CAPABILITY => array(
+        'template' => PholioMockPHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_VIEW,
+      ),
+      PholioDefaultEditCapability::CAPABILITY => array(
+        'template' => PholioMockPHIDType::TYPECONST,
+        'capability' => PhabricatorPolicyCapability::CAN_EDIT,
+      ),
     );
   }
 

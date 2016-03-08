@@ -11,19 +11,11 @@ final class PhabricatorPolicyDataTestCase extends PhabricatorTestCase {
   public function testProjectPolicyMembership() {
     $author = $this->generateNewTestUser();
 
-    $proj_a = id(new PhabricatorProject())
+    $proj_a = PhabricatorProject::initializeNewProject($author)
       ->setName('A')
-      ->setAuthorPHID($author->getPHID())
-      ->setIcon(PhabricatorProject::DEFAULT_ICON)
-      ->setColor(PhabricatorProject::DEFAULT_COLOR)
-      ->setIsMembershipLocked(0)
       ->save();
-    $proj_b = id(new PhabricatorProject())
+    $proj_b = PhabricatorProject::initializeNewProject($author)
       ->setName('B')
-      ->setAuthorPHID($author->getPHID())
-      ->setIcon(PhabricatorProject::DEFAULT_ICON)
-      ->setColor(PhabricatorProject::DEFAULT_COLOR)
-      ->setIsMembershipLocked(0)
       ->save();
 
     $proj_a->setViewPolicy($proj_b->getPHID())->save();
@@ -148,6 +140,92 @@ final class PhabricatorPolicyDataTestCase extends PhabricatorTestCase {
       $this->assertFalse($can_a_view);
 
     unset($time_b);
+  }
+
+  public function testObjectPolicyRuleTaskAuthor() {
+    $author = $this->generateNewTestUser();
+    $viewer = $this->generateNewTestUser();
+
+    $rule = new ManiphestTaskAuthorPolicyRule();
+
+    $task = ManiphestTask::initializeNewTask($author);
+    $task->setViewPolicy($rule->getObjectPolicyFullKey());
+    $task->save();
+
+    $this->assertTrue(
+      PhabricatorPolicyFilter::hasCapability(
+        $author,
+        $task,
+        PhabricatorPolicyCapability::CAN_VIEW));
+
+    $this->assertFalse(
+      PhabricatorPolicyFilter::hasCapability(
+        $viewer,
+        $task,
+        PhabricatorPolicyCapability::CAN_VIEW));
+  }
+
+  public function testObjectPolicyRuleThreadMembers() {
+    $author = $this->generateNewTestUser();
+    $viewer = $this->generateNewTestUser();
+
+    $rule = new ConpherenceThreadMembersPolicyRule();
+
+    $thread = ConpherenceThread::initializeNewRoom($author);
+    $thread->setViewPolicy($rule->getObjectPolicyFullKey());
+    $thread->save();
+
+    $this->assertFalse(
+      PhabricatorPolicyFilter::hasCapability(
+        $author,
+        $thread,
+        PhabricatorPolicyCapability::CAN_VIEW));
+
+    $this->assertFalse(
+      PhabricatorPolicyFilter::hasCapability(
+        $viewer,
+        $thread,
+        PhabricatorPolicyCapability::CAN_VIEW));
+
+    $participant = id(new ConpherenceParticipant())
+      ->setParticipantPHID($viewer->getPHID())
+      ->setConpherencePHID($thread->getPHID());
+
+    $thread->attachParticipants(array($viewer->getPHID() => $participant));
+
+    $this->assertTrue(
+      PhabricatorPolicyFilter::hasCapability(
+        $viewer,
+        $thread,
+        PhabricatorPolicyCapability::CAN_VIEW));
+  }
+
+  public function testObjectPolicyRuleSubscribers() {
+    $author = $this->generateNewTestUser();
+
+    $rule = new PhabricatorSubscriptionsSubscribersPolicyRule();
+
+    $task = ManiphestTask::initializeNewTask($author);
+    $task->setViewPolicy($rule->getObjectPolicyFullKey());
+    $task->save();
+
+    $this->assertFalse(
+      PhabricatorPolicyFilter::hasCapability(
+        $author,
+        $task,
+        PhabricatorPolicyCapability::CAN_VIEW));
+
+    id(new PhabricatorSubscriptionsEditor())
+      ->setActor($author)
+      ->setObject($task)
+      ->subscribeExplicit(array($author->getPHID()))
+      ->save();
+
+    $this->assertTrue(
+      PhabricatorPolicyFilter::hasCapability(
+        $author,
+        $task,
+        PhabricatorPolicyCapability::CAN_VIEW));
   }
 
 }

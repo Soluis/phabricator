@@ -14,7 +14,7 @@ final class PhabricatorDoorkeeperApplication extends PhabricatorApplication {
     return pht('Doorkeeper');
   }
 
-  public function getFontIcon() {
+  public function getIcon() {
     return 'fa-recycle';
   }
 
@@ -24,8 +24,8 @@ final class PhabricatorDoorkeeperApplication extends PhabricatorApplication {
 
   public function getRemarkupRules() {
     return array(
-      new DoorkeeperRemarkupRuleAsana(),
-      new DoorkeeperRemarkupRuleJIRA(),
+      new DoorkeeperAsanaRemarkupRule(),
+      new DoorkeeperJIRARemarkupRule(),
     );
   }
 

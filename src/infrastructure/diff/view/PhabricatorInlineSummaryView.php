@@ -31,11 +31,12 @@ final class PhabricatorInlineSummaryView extends AphrontView {
       }
 
       $icon = id(new PHUIIconView())
-        ->setIconFont('fa-file-code-o darkbluetext mmr');
+        ->setIcon('fa-file-code-o darkbluetext mmr');
       $header = phutil_tag(
         'th',
         array(
           'colspan' => 3,
+          'class' => 'inline-comment-summary-table-header',
         ),
         array(
           $icon,
@@ -64,7 +65,7 @@ final class PhabricatorInlineSummaryView extends AphrontView {
 
         if ($href) {
           $icon = id(new PHUIIconView())
-            ->setIconFont('fa-share darkbluetext mmr');
+            ->setIcon('fa-share darkbluetext mmr');
 
           $lines = phutil_tag(
             'a',
@@ -87,14 +88,18 @@ final class PhabricatorInlineSummaryView extends AphrontView {
           'tr',
           array(),
           array(
-            phutil_tag('td', array('class' => 'inline-line-number'), $lines),
+            phutil_tag('td',
+              array('class' => 'inline-line-number inline-table-dolumn'),
+              $lines),
             ($has_where
-              ? phutil_tag('td', array('class' => 'inline-which-diff'), $where)
+              ? phutil_tag('td',
+              array('class' => 'inline-which-diff inline-table-dolumn'),
+              $where)
               : null),
             phutil_tag(
               'td',
               array(
-                'class' => 'inline-summary-content',
+                'class' => 'inline-summary-content inline-table-dolumn',
                 'colspan' => $colspan,
               ),
               phutil_tag_div('phabricator-remarkup', $item['content'])),

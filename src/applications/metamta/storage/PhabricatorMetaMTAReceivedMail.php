@@ -82,7 +82,7 @@ final class PhabricatorMetaMTAReceivedMail extends PhabricatorMetaMTADAO {
     return $this->getRawEmailAddresses(idx($this->headers, 'to'));
   }
 
-  public function loadExcludeMailRecipientPHIDs() {
+  public function loadAllRecipientPHIDs() {
     $addresses = array_merge(
       $this->getToAddresses(),
       $this->getCCAddresses());
@@ -100,13 +100,7 @@ final class PhabricatorMetaMTAReceivedMail extends PhabricatorMetaMTADAO {
     }
     $users = id(new PhabricatorUserEmail())
       ->loadAllWhere('address IN (%Ls)', $addresses);
-    $user_phids = mpull($users, 'getUserPHID');
-
-    $mailing_lists = id(new PhabricatorMetaMTAMailingList())
-      ->loadAllWhere('email in (%Ls)', $addresses);
-    $mailing_list_phids = mpull($mailing_lists, 'getPHID');
-
-    return array_merge($user_phids,  $mailing_list_phids);
+    return mpull($users, 'getUserPHID');
   }
 
   public function processReceivedMail() {
@@ -271,15 +265,13 @@ final class PhabricatorMetaMTAReceivedMail extends PhabricatorMetaMTADAO {
    * accepts this mail, if one exists.
    */
   private function loadReceiver() {
-    $receivers = id(new PhutilSymbolLoader())
+    $receivers = id(new PhutilClassMapQuery())
       ->setAncestorClass('PhabricatorMailReceiver')
-      ->loadObjects();
+      ->setFilterMethod('isEnabled')
+      ->execute();
 
     $accept = array();
     foreach ($receivers as $key => $receiver) {
-      if (!$receiver->isEnabled()) {
-        continue;
-      }
       if ($receiver->canAcceptMail($this)) {
         $accept[$key] = $receiver;
       }
@@ -335,9 +327,18 @@ final class PhabricatorMetaMTAReceivedMail extends PhabricatorMetaMTADAO {
     // really be all the headers. It would be nice to pass the raw headers
     // through from the upper layers where possible.
 
+    // On the MimeMailParser pathway, we arrive here with a list value for
+    // headers that appeared multiple times in the original mail. Be
+    // accommodating until header handling gets straightened out.
+
     $headers = array();
-    foreach ($this->headers as $key => $value) {
-      $headers[] = pht('%s: %s', $key, $value);
+    foreach ($this->headers as $key => $values) {
+      if (!is_array($values)) {
+        $values = array($values);
+      }
+      foreach ($values as $value) {
+        $headers[] = pht('%s: %s', $key, $value);
+      }
     }
     $headers = implode("\n", $headers);
 

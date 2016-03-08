@@ -1,14 +1,15 @@
 <?php
 
-final class HeraldEngine {
+final class HeraldEngine extends Phobject {
 
   protected $rules = array();
   protected $results = array();
   protected $stack = array();
-  protected $activeRule = null;
+  protected $activeRule;
+  protected $transcript;
 
   protected $fieldCache = array();
-  protected $object = null;
+  protected $object;
   private $dryRun;
 
   public function setDryRun($dry_run) {
@@ -272,6 +273,16 @@ final class HeraldEngine {
       $result = false;
     } else {
       foreach ($conditions as $condition) {
+        try {
+          $object->getHeraldField($condition->getFieldName());
+        } catch (Exception $ex) {
+          $reason = pht(
+            'Field "%s" does not exist!',
+            $condition->getFieldName());
+          $result = false;
+          break;
+        }
+
         $match = $this->doesConditionMatch($rule, $condition, $object);
 
         if (!$all && $match) {

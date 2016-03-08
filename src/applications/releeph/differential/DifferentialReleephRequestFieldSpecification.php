@@ -16,7 +16,7 @@
  * button.)
  *
  */
-final class DifferentialReleephRequestFieldSpecification {
+final class DifferentialReleephRequestFieldSpecification extends Phobject {
 
   // TODO: This class is essentially dead right now, see T2222.
 
@@ -51,7 +51,7 @@ final class DifferentialReleephRequestFieldSpecification {
   }
 
   public function renderLabelForRevisionView() {
-    return 'Releeph';
+    return pht('Releeph');
   }
 
   public function getRequiredHandlePHIDs() {
@@ -246,7 +246,7 @@ final class DifferentialReleephRequestFieldSpecification {
   }
 
   public function renderLabelForCommitMessage() {
-    return 'Releeph';
+    return pht('Releeph');
   }
 
   public function shouldAppearOnCommitMessageTemplate() {
@@ -372,7 +372,7 @@ final class DifferentialReleephRequestFieldSpecification {
             'part of a Releeph branch, but also has %d path change(s) not '.
             'part of a Releeph branch!',
             $commit->getCommitIdentifier(),
-            $repo->getCallsign(),
+            $repo->getDisplayName(),
             count($in_branch),
             count($ex_branch));
           phlog($error);

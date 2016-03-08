@@ -114,7 +114,7 @@ final class PhabricatorBotObjectNameHandler extends PhabricatorBotHandler {
                 'poll_id' => $vote_id,
               ));
             $output[$vote['phid']] = 'V'.$vote['id'].': '.$vote['question'].
-              ' Come Vote '.$vote['uri'];
+              ' '.pht('Come Vote').' '.$vote['uri'];
           }
         }
 
@@ -173,7 +173,7 @@ final class PhabricatorBotObjectNameHandler extends PhabricatorBotHandler {
 
           // Don't mention the same object more than once every 10 minutes
           // in public channels, so we avoid spamming the chat over and over
-          // again for discsussions of a specific revision, for example.
+          // again for discussions of a specific revision, for example.
 
           $target_name = $original_message->getTarget()->getName();
           if (empty($this->recentlyMentioned[$target_name])) {

@@ -17,10 +17,7 @@ final class DifferentialLocalCommitsView extends AphrontView {
   }
 
   public function render() {
-    $user = $this->user;
-    if (!$user) {
-      throw new PhutilInvalidStateException('setUser');
-    }
+    $viewer = $this->getViewer();
 
     $local = $this->localCommits;
     if (!$local) {
@@ -94,7 +91,7 @@ final class DifferentialLocalCommitsView extends AphrontView {
         idx($commit, 'date'),
         idx($commit, 'time'));
       if ($date) {
-        $date = phabricator_datetime($date, $user);
+        $date = phabricator_datetime($date, $viewer);
       }
       $row[] = $date;
 
@@ -130,7 +127,7 @@ final class DifferentialLocalCommitsView extends AphrontView {
 
     return id(new PHUIObjectBoxView())
       ->setHeaderText(pht('Local Commits'))
-      ->appendChild($table);
+      ->setTable($table);
   }
 
   private static function formatCommit($commit) {

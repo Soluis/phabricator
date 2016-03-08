@@ -1,6 +1,6 @@
 <?php
 
-abstract class DarkConsolePlugin {
+abstract class DarkConsolePlugin extends Phobject {
 
   private $data;
   private $request;
@@ -60,10 +60,6 @@ abstract class DarkConsolePlugin {
 
   public function getRequestURI() {
     return $this->getRequest()->getRequestURI();
-  }
-
-  public function shouldStartup() {
-    return true;
   }
 
   public function didStartup() {

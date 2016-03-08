@@ -14,17 +14,56 @@
  * @task exec       Paging and Executing Queries
  * @task render     Rendering Results
  */
-abstract class PhabricatorApplicationSearchEngine {
+abstract class PhabricatorApplicationSearchEngine extends Phobject {
 
   private $application;
   private $viewer;
   private $errors = array();
-  private $customFields = false;
   private $request;
   private $context;
+  private $controller;
+  private $namedQueries;
+  private $navigationItems = array();
 
   const CONTEXT_LIST  = 'list';
   const CONTEXT_PANEL = 'panel';
+
+  public function setController(PhabricatorController $controller) {
+    $this->controller = $controller;
+    return $this;
+  }
+
+  public function getController() {
+    return $this->controller;
+  }
+
+  public function buildResponse() {
+    $controller = $this->getController();
+    $request = $controller->getRequest();
+
+    $search = id(new PhabricatorApplicationSearchController())
+      ->setQueryKey($request->getURIData('queryKey'))
+      ->setSearchEngine($this);
+
+    return $controller->delegateToController($search);
+  }
+
+  public function newResultObject() {
+    // We may be able to get this automatically if newQuery() is implemented.
+    $query = $this->newQuery();
+    if ($query) {
+      $object = $query->newResultObject();
+      if ($object) {
+        return $object;
+      }
+    }
+
+    return null;
+  }
+
+  public function newQuery() {
+    return null;
+  }
 
   public function setViewer(PhabricatorUser $viewer) {
     $this->viewer = $viewer;
@@ -46,6 +85,18 @@ abstract class PhabricatorApplicationSearchEngine {
   public function isPanelContext() {
     return ($this->context == self::CONTEXT_PANEL);
   }
+
+  public function setNavigationItems(array $navigation_items) {
+    assert_instances_of($navigation_items, 'PHUIListItemView');
+    $this->navigationItems = $navigation_items;
+    return $this;
+  }
+
+  public function getNavigationItems() {
+    return $this->navigationItems;
+  }
+
+
 
   public function canUseInPanelContext() {
     return true;
@@ -69,8 +120,20 @@ abstract class PhabricatorApplicationSearchEngine {
    * @param AphrontRequest The search request.
    * @return PhabricatorSavedQuery
    */
-  abstract public function buildSavedQueryFromRequest(
-    AphrontRequest $request);
+  public function buildSavedQueryFromRequest(AphrontRequest $request) {
+    $fields = $this->buildSearchFields();
+    $viewer = $this->requireViewer();
+
+    $saved = new PhabricatorSavedQuery();
+    foreach ($fields as $field) {
+      $field->setViewer($viewer);
+
+      $value = $field->readValueFromRequest($request);
+      $saved->setParameter($field->getKey(), $value);
+    }
+
+    return $saved;
+  }
 
   /**
    * Executes the saved query.
@@ -78,8 +141,66 @@ abstract class PhabricatorApplicationSearchEngine {
    * @param PhabricatorSavedQuery The saved query to operate on.
    * @return The result of the query.
    */
-  abstract public function buildQueryFromSavedQuery(
-    PhabricatorSavedQuery $saved);
+  public function buildQueryFromSavedQuery(PhabricatorSavedQuery $saved) {
+    $saved = clone $saved;
+    $this->willUseSavedQuery($saved);
+
+    $fields = $this->buildSearchFields();
+    $viewer = $this->requireViewer();
+
+    $map = array();
+    foreach ($fields as $field) {
+      $field->setViewer($viewer);
+      $field->readValueFromSavedQuery($saved);
+      $value = $field->getValueForQuery($field->getValue());
+      $map[$field->getKey()] = $value;
+    }
+
+    $query = $this->buildQueryFromParameters($map);
+
+    $object = $this->newResultObject();
+    if (!$object) {
+      return $query;
+    }
+
+    $extensions = $this->getEngineExtensions();
+    foreach ($extensions as $extension) {
+      $extension->applyConstraintsToQuery($object, $query, $saved, $map);
+    }
+
+    $order = $saved->getParameter('order');
+    $builtin = $query->getBuiltinOrderAliasMap();
+    if (strlen($order) && isset($builtin[$order])) {
+      $query->setOrder($order);
+    } else {
+      // If the order is invalid or not available, we choose the first
+      // builtin order. This isn't always the default order for the query,
+      // but is the first value in the "Order" dropdown, and makes the query
+      // behavior more consistent with the UI. In queries where the two
+      // orders differ, this order is the preferred order for humans.
+      $query->setOrder(head_key($builtin));
+    }
+
+    return $query;
+  }
+
+  /**
+   * Hook for subclasses to adjust saved queries prior to use.
+   *
+   * If an application changes how queries are saved, it can implement this
+   * hook to keep old queries working the way users expect, by reading,
+   * adjusting, and overwriting parameters.
+   *
+   * @param PhabricatorSavedQuery Saved query which will be executed.
+   * @return void
+   */
+  protected function willUseSavedQuery(PhabricatorSavedQuery $saved) {
+    return;
+  }
+
+  protected function buildQueryFromParameters(array $parameters) {
+    throw new PhutilMethodNotImplementedException();
+  }
 
   /**
    * Builds the search form using the request.
@@ -88,9 +209,156 @@ abstract class PhabricatorApplicationSearchEngine {
    * @param PhabricatorSavedQuery The query from which to build the form.
    * @return void
    */
-  abstract public function buildSearchForm(
+  public function buildSearchForm(
     AphrontFormView $form,
-    PhabricatorSavedQuery $query);
+    PhabricatorSavedQuery $saved) {
+
+    $saved = clone $saved;
+    $this->willUseSavedQuery($saved);
+
+    $fields = $this->buildSearchFields();
+    $fields = $this->adjustFieldsForDisplay($fields);
+    $viewer = $this->requireViewer();
+
+    foreach ($fields as $field) {
+      $field->setViewer($viewer);
+      $field->readValueFromSavedQuery($saved);
+    }
+
+    foreach ($fields as $field) {
+      foreach ($field->getErrors() as $error) {
+        $this->addError(last($error));
+      }
+    }
+
+    foreach ($fields as $field) {
+      $field->appendToForm($form);
+    }
+  }
+
+  protected function buildSearchFields() {
+    $fields = array();
+
+    foreach ($this->buildCustomSearchFields() as $field) {
+      $fields[] = $field;
+    }
+
+    $object = $this->newResultObject();
+    if ($object) {
+      $extensions = $this->getEngineExtensions();
+      foreach ($extensions as $extension) {
+        $extension_fields = $extension->getSearchFields($object);
+        foreach ($extension_fields as $extension_field) {
+          $fields[] = $extension_field;
+        }
+      }
+    }
+
+    $query = $this->newQuery();
+    if ($query && $this->shouldShowOrderField()) {
+      $orders = $query->getBuiltinOrders();
+      $orders = ipull($orders, 'name');
+
+      $fields[] = id(new PhabricatorSearchOrderField())
+        ->setLabel(pht('Order By'))
+        ->setKey('order')
+        ->setOrderAliases($query->getBuiltinOrderAliasMap())
+        ->setOptions($orders);
+    }
+
+    $field_map = array();
+    foreach ($fields as $field) {
+      $key = $field->getKey();
+      if (isset($field_map[$key])) {
+        throw new Exception(
+          pht(
+            'Two fields in this SearchEngine use the same key ("%s"), but '.
+            'each field must use a unique key.',
+            $key));
+      }
+      $field_map[$key] = $field;
+    }
+
+    return $field_map;
+  }
+
+  protected function shouldShowOrderField() {
+    return true;
+  }
+
+  private function adjustFieldsForDisplay(array $field_map) {
+    $order = $this->getDefaultFieldOrder();
+
+    $head_keys = array();
+    $tail_keys = array();
+    $seen_tail = false;
+    foreach ($order as $order_key) {
+      if ($order_key === '...') {
+        $seen_tail = true;
+        continue;
+      }
+
+      if (!$seen_tail) {
+        $head_keys[] = $order_key;
+      } else {
+        $tail_keys[] = $order_key;
+      }
+    }
+
+    $head = array_select_keys($field_map, $head_keys);
+    $body = array_diff_key($field_map, array_fuse($tail_keys));
+    $tail = array_select_keys($field_map, $tail_keys);
+
+    $result = $head + $body + $tail;
+
+    foreach ($this->getHiddenFields() as $hidden_key) {
+      unset($result[$hidden_key]);
+    }
+
+    return $result;
+  }
+
+  protected function buildCustomSearchFields() {
+    throw new PhutilMethodNotImplementedException();
+  }
+
+
+  /**
+   * Define the default display order for fields by returning a list of
+   * field keys.
+   *
+   * You can use the special key `...` to mean "all unspecified fields go
+   * here". This lets you easily put important fields at the top of the form,
+   * standard fields in the middle of the form, and less important fields at
+   * the bottom.
+   *
+   * For example, you might return a list like this:
+   *
+   *   return array(
+   *     'authorPHIDs',
+   *     'reviewerPHIDs',
+   *     '...',
+   *     'createdAfter',
+   *     'createdBefore',
+   *   );
+   *
+   * Any unspecified fields (including custom fields and fields added
+   * automatically by infrastruture) will be put in the middle.
+   *
+   * @return list<string> Default ordering for field keys.
+   */
+  protected function getDefaultFieldOrder() {
+    return array();
+  }
+
+  /**
+   * Return a list of field keys which should be hidden from the viewer.
+   *
+    * @return list<string> Fields to hide.
+   */
+  protected function getHiddenFields() {
+    return array();
+  }
 
   public function getErrors() {
     return $this->errors;
@@ -175,38 +443,45 @@ abstract class PhabricatorApplicationSearchEngine {
     $advanced_uri = $this->getQueryResultsPageURI('advanced');
     $menu->newLink(pht('Advanced Search'), $advanced_uri, 'query/advanced');
 
+    foreach ($this->navigationItems as $extra_item) {
+      $menu->addMenuItem($extra_item);
+    }
+
     return $this;
   }
 
   public function loadAllNamedQueries() {
     $viewer = $this->requireViewer();
-
-    $named_queries = id(new PhabricatorNamedQueryQuery())
-      ->setViewer($viewer)
-      ->withUserPHIDs(array($viewer->getPHID()))
-      ->withEngineClassNames(array(get_class($this)))
-      ->execute();
-    $named_queries = mpull($named_queries, null, 'getQueryKey');
-
     $builtin = $this->getBuiltinQueries($viewer);
-    $builtin = mpull($builtin, null, 'getQueryKey');
 
-    foreach ($named_queries as $key => $named_query) {
-      if ($named_query->getIsBuiltin()) {
-        if (isset($builtin[$key])) {
-          $named_queries[$key]->setQueryName($builtin[$key]->getQueryName());
-          unset($builtin[$key]);
-        } else {
-          unset($named_queries[$key]);
+    if ($this->namedQueries === null) {
+      $named_queries = id(new PhabricatorNamedQueryQuery())
+        ->setViewer($viewer)
+        ->withUserPHIDs(array($viewer->getPHID()))
+        ->withEngineClassNames(array(get_class($this)))
+        ->execute();
+      $named_queries = mpull($named_queries, null, 'getQueryKey');
+
+      $builtin = mpull($builtin, null, 'getQueryKey');
+
+      foreach ($named_queries as $key => $named_query) {
+        if ($named_query->getIsBuiltin()) {
+          if (isset($builtin[$key])) {
+            $named_queries[$key]->setQueryName($builtin[$key]->getQueryName());
+            unset($builtin[$key]);
+          } else {
+            unset($named_queries[$key]);
+          }
         }
+
+        unset($builtin[$key]);
       }
 
-      unset($builtin[$key]);
+      $named_queries = msort($named_queries, 'getSortKey');
+      $this->namedQueries = $named_queries;
     }
 
-    $named_queries = msort($named_queries, 'getSortKey');
-
-    return $named_queries + $builtin;
+    return $this->namedQueries + $builtin;
   }
 
   public function loadEnabledNamedQueries() {
@@ -234,6 +509,8 @@ abstract class PhabricatorApplicationSearchEngine {
         PhabricatorProjectObjectHasProjectEdgeType::EDGECONST,
         $constraints);
     }
+
+    return $this;
   }
 
 
@@ -278,11 +555,9 @@ abstract class PhabricatorApplicationSearchEngine {
    * @task construct
    */
   public static function getAllEngines() {
-    $engines = id(new PhutilSymbolLoader())
+    return id(new PhutilClassMapQuery())
       ->setAncestorClass(__CLASS__)
-      ->loadObjects();
-
-    return $engines;
+      ->execute();
   }
 
 
@@ -484,7 +759,6 @@ abstract class PhabricatorApplicationSearchEngine {
       $key,
       array(
         PhabricatorProjectProjectPHIDType::TYPECONST,
-        PhabricatorMailingListListPHIDType::TYPECONST,
       ));
   }
 
@@ -667,68 +941,17 @@ abstract class PhabricatorApplicationSearchEngine {
   }
 
 
-/* -(  Result Ordering  )---------------------------------------------------- */
-
-
-  /**
-   * Save order selection to a @{class:PhabricatorSavedQuery}.
-   */
-  protected function saveQueryOrder(
-    PhabricatorSavedQuery $saved,
-    AphrontRequest $request) {
-
-    $saved->setParameter('order', $request->getStr('order'));
-
-    return $this;
-  }
-
-
-  /**
-   * Set query ordering from a saved value.
-   */
-  protected function setQueryOrder(
-    PhabricatorCursorPagedPolicyAwareQuery $query,
-    PhabricatorSavedQuery $saved) {
-
-    $order = $saved->getParameter('order');
-    $builtin = $query->getBuiltinOrders();
-    if (strlen($order) && isset($builtin[$order])) {
-      $query->setOrder($order);
-    } else {
-      // If the order is invalid or not available, we choose the first
-      // builtin order. This isn't always the default order for the query,
-      // but is the first value in the "Order" dropdown, and makes the query
-      // behavior more consistent with the UI. In queries where the two
-      // orders differ, this order is the preferred order for humans.
-      $query->setOrder(head_key($builtin));
-    }
-
-    return $this;
-  }
-
-
-
-  protected function appendOrderFieldsToForm(
-    AphrontFormView $form,
-    PhabricatorSavedQuery $saved,
-    PhabricatorCursorPagedPolicyAwareQuery $query) {
-
-    $orders = $query->getBuiltinOrders();
-    $orders = ipull($orders, 'name');
-
-    $form->appendControl(
-      id(new AphrontFormSelectControl())
-        ->setLabel(pht('Order'))
-        ->setName('order')
-        ->setOptions($orders)
-        ->setValue($saved->getParameter('order')));
-  }
-
 /* -(  Paging and Executing Queries  )--------------------------------------- */
 
 
   public function getPageSize(PhabricatorSavedQuery $saved) {
-    return $saved->getParameter('limit', 100);
+    $limit = (int)$saved->getParameter('limit');
+
+    if ($limit > 0) {
+      return $limit;
+    }
+
+    return 100;
   }
 
 
@@ -739,7 +962,7 @@ abstract class PhabricatorApplicationSearchEngine {
 
   public function newPagerForSavedQuery(PhabricatorSavedQuery $saved) {
     if ($this->shouldUseOffsetPaging()) {
-      $pager = new AphrontPagerView();
+      $pager = new PHUIPagerView();
     } else {
       $pager = new AphrontCursorPagerView();
     }
@@ -811,221 +1034,351 @@ abstract class PhabricatorApplicationSearchEngine {
     return array();
   }
 
-  protected function renderResultList(
+  abstract protected function renderResultList(
     array $objects,
     PhabricatorSavedQuery $query,
-    array $handles) {
-    throw new Exception(pht('Not supported here yet!'));
-  }
+    array $handles);
 
 
 /* -(  Application Search  )------------------------------------------------- */
 
 
-  /**
-   * Retrieve an object to use to define custom fields for this search.
-   *
-   * To integrate with custom fields, subclasses should override this method
-   * and return an instance of the application object which implements
-   * @{interface:PhabricatorCustomFieldInterface}.
-   *
-   * @return PhabricatorCustomFieldInterface|null Object with custom fields.
-   * @task appsearch
-   */
-  public function getCustomFieldObject() {
+  public function getSearchFieldsForConduit() {
+    $standard_fields = $this->buildSearchFields();
+
+    $fields = array();
+    foreach ($standard_fields as $field_key => $field) {
+      $conduit_key = $field->getConduitKey();
+
+      if (isset($fields[$conduit_key])) {
+        $other = $fields[$conduit_key];
+        $other_key = $other->getKey();
+
+        throw new Exception(
+          pht(
+            'SearchFields "%s" (of class "%s") and "%s" (of class "%s") both '.
+            'define the same Conduit key ("%s"). Keys must be unique.',
+            $field_key,
+            get_class($field),
+            $other_key,
+            get_class($other),
+            $conduit_key));
+      }
+
+      $fields[$conduit_key] = $field;
+    }
+
+    // These are handled separately for Conduit, so don't show them as
+    // supported.
+    unset($fields['order']);
+    unset($fields['limit']);
+
+    $viewer = $this->requireViewer();
+    foreach ($fields as $key => $field) {
+      $field->setViewer($viewer);
+    }
+
+    return $fields;
+  }
+
+  public function buildConduitResponse(
+    ConduitAPIRequest $request,
+    ConduitAPIMethod $method) {
+    $viewer = $this->requireViewer();
+
+    $query_key = $request->getValue('queryKey');
+    if (!strlen($query_key)) {
+      $saved_query = new PhabricatorSavedQuery();
+    } else if ($this->isBuiltinQuery($query_key)) {
+      $saved_query = $this->buildSavedQueryFromBuiltin($query_key);
+    } else {
+      $saved_query = id(new PhabricatorSavedQueryQuery())
+        ->setViewer($viewer)
+        ->withQueryKeys(array($query_key))
+        ->executeOne();
+      if (!$saved_query) {
+        throw new Exception(
+          pht(
+            'Query key "%s" does not correspond to a valid query.',
+            $query_key));
+      }
+    }
+
+    $constraints = $request->getValue('constraints', array());
+
+    $fields = $this->getSearchFieldsForConduit();
+
+    foreach ($fields as $key => $field) {
+      if (!$field->getConduitParameterType()) {
+        unset($fields[$key]);
+      }
+    }
+
+    foreach ($fields as $field) {
+      if (!$field->getValueExistsInConduitRequest($constraints)) {
+        continue;
+      }
+
+      $value = $field->readValueFromConduitRequest($constraints);
+      $saved_query->setParameter($field->getKey(), $value);
+    }
+
+    $this->saveQuery($saved_query);
+
+    $query = $this->buildQueryFromSavedQuery($saved_query);
+    $pager = $this->newPagerForSavedQuery($saved_query);
+
+    $attachments = $this->getConduitSearchAttachments();
+
+    // TODO: Validate this better.
+    $attachment_specs = $request->getValue('attachments', array());
+    $attachments = array_select_keys(
+      $attachments,
+      array_keys($attachment_specs));
+
+    foreach ($attachments as $key => $attachment) {
+      $attachment->setViewer($viewer);
+    }
+
+    foreach ($attachments as $key => $attachment) {
+      $attachment->willLoadAttachmentData($query, $attachment_specs[$key]);
+    }
+
+    $this->setQueryOrderForConduit($query, $request);
+    $this->setPagerLimitForConduit($pager, $request);
+    $this->setPagerOffsetsForConduit($pager, $request);
+
+    $objects = $this->executeQuery($query, $pager);
+
+    $data = array();
+    if ($objects) {
+      $field_extensions = $this->getConduitFieldExtensions();
+
+      $attachment_data = array();
+      foreach ($attachments as $key => $attachment) {
+        $attachment_data[$key] = $attachment->loadAttachmentData(
+          $objects,
+          $attachment_specs[$key]);
+      }
+
+      foreach ($objects as $object) {
+        $field_map = $this->getObjectWireFieldsForConduit(
+          $object,
+          $field_extensions);
+
+        $attachment_map = array();
+        foreach ($attachments as $key => $attachment) {
+          $attachment_map[$key] = $attachment->getAttachmentForObject(
+            $object,
+            $attachment_data[$key],
+            $attachment_specs[$key]);
+        }
+
+        // If this is empty, we still want to emit a JSON object, not a
+        // JSON list.
+        if (!$attachment_map) {
+          $attachment_map = (object)$attachment_map;
+        }
+
+        $id = (int)$object->getID();
+        $phid = $object->getPHID();
+
+        $data[] = array(
+          'id' => $id,
+          'type' => phid_get_type($phid),
+          'phid' => $phid,
+          'fields' => $field_map,
+          'attachments' => $attachment_map,
+        );
+      }
+    }
+
+    return array(
+      'data' => $data,
+      'maps' => $method->getQueryMaps($query),
+      'query' => array(
+        'queryKey' => $saved_query->getQueryKey(),
+      ),
+      'cursor' => array(
+        'limit' => $pager->getPageSize(),
+        'after' => $pager->getNextPageID(),
+        'before' => $pager->getPrevPageID(),
+        'order' => $request->getValue('order'),
+      ),
+    );
+  }
+
+  public function getAllConduitFieldSpecifications() {
+    $extensions = $this->getConduitFieldExtensions();
+    $object = $this->newQuery()->newResultObject();
+
+    $map = array();
+    foreach ($extensions as $extension) {
+      $specifications = $extension->getFieldSpecificationsForConduit($object);
+      foreach ($specifications as $specification) {
+        $key = $specification->getKey();
+        if (isset($map[$key])) {
+          throw new Exception(
+            pht(
+              'Two field specifications share the same key ("%s"). Each '.
+              'specification must have a unique key.',
+              $key));
+        }
+        $map[$key] = $specification;
+      }
+    }
+
+    return $map;
+  }
+
+  private function getEngineExtensions() {
+    $extensions = PhabricatorSearchEngineExtension::getAllEnabledExtensions();
+
+    foreach ($extensions as $key => $extension) {
+      $extension
+        ->setViewer($this->requireViewer())
+        ->setSearchEngine($this);
+    }
+
+    $object = $this->newResultObject();
+    foreach ($extensions as $key => $extension) {
+      if (!$extension->supportsObject($object)) {
+        unset($extensions[$key]);
+      }
+    }
+
+    return $extensions;
+  }
+
+
+  private function getConduitFieldExtensions() {
+    $extensions = $this->getEngineExtensions();
+    $object = $this->newResultObject();
+
+    foreach ($extensions as $key => $extension) {
+      if (!$extension->getFieldSpecificationsForConduit($object)) {
+        unset($extensions[$key]);
+      }
+    }
+
+    return $extensions;
+  }
+
+  private function setQueryOrderForConduit($query, ConduitAPIRequest $request) {
+    $order = $request->getValue('order');
+    if ($order === null) {
+      return;
+    }
+
+    if (is_scalar($order)) {
+      $query->setOrder($order);
+    } else {
+      $query->setOrderVector($order);
+    }
+  }
+
+  private function setPagerLimitForConduit($pager, ConduitAPIRequest $request) {
+    $limit = $request->getValue('limit');
+
+    // If there's no limit specified and the query uses a weird huge page
+    // size, just leave it at the default gigantic page size. Otherwise,
+    // make sure it's between 1 and 100, inclusive.
+
+    if ($limit === null) {
+      if ($pager->getPageSize() >= 0xFFFF) {
+        return;
+      } else {
+        $limit = 100;
+      }
+    }
+
+    if ($limit > 100) {
+      throw new Exception(
+        pht(
+          'Maximum page size for Conduit API method calls is 100, but '.
+          'this call specified %s.',
+          $limit));
+    }
+
+    if ($limit < 1) {
+      throw new Exception(
+        pht(
+          'Minimum page size for API searches is 1, but this call '.
+          'specified %s.',
+          $limit));
+    }
+
+    $pager->setPageSize($limit);
+  }
+
+  private function setPagerOffsetsForConduit(
+    $pager,
+    ConduitAPIRequest $request) {
+    $before_id = $request->getValue('before');
+    if ($before_id !== null) {
+      $pager->setBeforeID($before_id);
+    }
+
+    $after_id = $request->getValue('after');
+    if ($after_id !== null) {
+      $pager->setAfterID($after_id);
+    }
+  }
+
+  protected function getObjectWireFieldsForConduit(
+    $object,
+    array $field_extensions) {
+
+    $fields = array();
+    foreach ($field_extensions as $extension) {
+      $fields += $extension->getFieldValuesForConduit($object);
+    }
+
+    return $fields;
+  }
+
+  public function getConduitSearchAttachments() {
+    $extensions = $this->getEngineExtensions();
+    $object = $this->newResultObject();
+
+    $attachments = array();
+    foreach ($extensions as $extension) {
+      $extension_attachments = $extension->getSearchAttachments($object);
+      foreach ($extension_attachments as $attachment) {
+        $attachment_key = $attachment->getAttachmentKey();
+        if (isset($attachments[$attachment_key])) {
+          $other = $attachments[$attachment_key];
+          throw new Exception(
+            pht(
+              'Two search engine attachments (of classes "%s" and "%s") '.
+              'specify the same attachment key ("%s"); keys must be unique.',
+              get_class($attachment),
+              get_class($other),
+              $attachment_key));
+        }
+        $attachments[$attachment_key] = $attachment;
+      }
+    }
+
+    return $attachments;
+  }
+
+  final public function renderNewUserView() {
+    $body = $this->getNewUserBody();
+
+    if (!$body) {
+      return null;
+    }
+
+    return $body;
+  }
+
+  protected function getNewUserHeader() {
     return null;
   }
 
-
-  /**
-   * Get the custom fields for this search.
-   *
-   * @return PhabricatorCustomFieldList|null Custom fields, if this search
-   *   supports custom fields.
-   * @task appsearch
-   */
-  public function getCustomFieldList() {
-    if ($this->customFields === false) {
-      $object = $this->getCustomFieldObject();
-      if ($object) {
-        $fields = PhabricatorCustomField::getObjectFields(
-          $object,
-          PhabricatorCustomField::ROLE_APPLICATIONSEARCH);
-        $fields->setViewer($this->requireViewer());
-      } else {
-        $fields = null;
-      }
-      $this->customFields = $fields;
-    }
-    return $this->customFields;
-  }
-
-
-  /**
-   * Moves data from the request into a saved query.
-   *
-   * @param AphrontRequest Request to read.
-   * @param PhabricatorSavedQuery Query to write to.
-   * @return void
-   * @task appsearch
-   */
-  protected function readCustomFieldsFromRequest(
-    AphrontRequest $request,
-    PhabricatorSavedQuery $saved) {
-
-    $list = $this->getCustomFieldList();
-    if (!$list) {
-      return;
-    }
-
-    foreach ($list->getFields() as $field) {
-      $key = $this->getKeyForCustomField($field);
-      $value = $field->readApplicationSearchValueFromRequest(
-        $this,
-        $request);
-      $saved->setParameter($key, $value);
-    }
-  }
-
-
-  /**
-   * Applies data from a saved query to an executable query.
-   *
-   * @param PhabricatorCursorPagedPolicyAwareQuery Query to constrain.
-   * @param PhabricatorSavedQuery Saved query to read.
-   * @return void
-   */
-  protected function applyCustomFieldsToQuery(
-    PhabricatorCursorPagedPolicyAwareQuery $query,
-    PhabricatorSavedQuery $saved) {
-
-    $list = $this->getCustomFieldList();
-    if (!$list) {
-      return;
-    }
-
-    foreach ($list->getFields() as $field) {
-      $key = $this->getKeyForCustomField($field);
-      $value = $field->applyApplicationSearchConstraintToQuery(
-        $this,
-        $query,
-        $saved->getParameter($key));
-    }
-  }
-
-  protected function applyOrderByToQuery(
-    PhabricatorCursorPagedPolicyAwareQuery $query,
-    array $standard_values,
-    $order) {
-
-    if (substr($order, 0, 7) === 'custom:') {
-      $list = $this->getCustomFieldList();
-      if (!$list) {
-        $query->setOrderBy(head($standard_values));
-        return;
-      }
-
-      foreach ($list->getFields() as $field) {
-        $key = $this->getKeyForCustomField($field);
-
-        if ($key === $order) {
-          $index = $field->buildOrderIndex();
-
-          if ($index === null) {
-            $query->setOrderBy(head($standard_values));
-            return;
-          }
-
-          $query->withApplicationSearchOrder(
-            $field,
-            $index,
-            false);
-          break;
-        }
-      }
-    } else {
-      $order = idx($standard_values, $order);
-      if ($order) {
-        $query->setOrderBy($order);
-      } else {
-        $query->setOrderBy(head($standard_values));
-      }
-    }
-  }
-
-
-  protected function getCustomFieldOrderOptions() {
-    $list = $this->getCustomFieldList();
-    if (!$list) {
-      return;
-    }
-
-    $custom_order = array();
-    foreach ($list->getFields() as $field) {
-      if ($field->shouldAppearInApplicationSearch()) {
-        if ($field->buildOrderIndex() !== null) {
-          $key = $this->getKeyForCustomField($field);
-          $custom_order[$key] = $field->getFieldName();
-        }
-      }
-    }
-
-    return $custom_order;
-  }
-
-  /**
-   * Get a unique key identifying a field.
-   *
-   * @param PhabricatorCustomField Field to identify.
-   * @return string Unique identifier, suitable for use as an input name.
-   */
-  public function getKeyForCustomField(PhabricatorCustomField $field) {
-    return 'custom:'.$field->getFieldIndex();
-  }
-
-
-  /**
-   * Add inputs to an application search form so the user can query on custom
-   * fields.
-   *
-   * @param AphrontFormView Form to update.
-   * @param PhabricatorSavedQuery Values to prefill.
-   * @return void
-   */
-  protected function appendCustomFieldsToForm(
-    AphrontFormView $form,
-    PhabricatorSavedQuery $saved) {
-
-    $list = $this->getCustomFieldList();
-    if (!$list) {
-      return;
-    }
-
-    $phids = array();
-    foreach ($list->getFields() as $field) {
-      $key = $this->getKeyForCustomField($field);
-      $value = $saved->getParameter($key);
-      $phids[$key] = $field->getRequiredHandlePHIDsForApplicationSearch($value);
-    }
-    $all_phids = array_mergev($phids);
-
-    $handles = array();
-    if ($all_phids) {
-      $handles = id(new PhabricatorHandleQuery())
-        ->setViewer($this->requireViewer())
-        ->withPHIDs($all_phids)
-        ->execute();
-    }
-
-    foreach ($list->getFields() as $field) {
-      $key = $this->getKeyForCustomField($field);
-      $value = $saved->getParameter($key);
-      $field->appendToApplicationSearchForm(
-        $this,
-        $form,
-        $value,
-        array_select_keys($handles, $phids[$key]));
-    }
+  protected function getNewUserBody() {
+    return null;
   }
 
 }
