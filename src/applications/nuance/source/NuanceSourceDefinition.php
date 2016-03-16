@@ -114,7 +114,7 @@ abstract class NuanceSourceDefinition extends Phobject {
         ->setCursorData($cursor_data);
     }
 
-    return $cursors;
+    return $map;
   }
 
   protected function newImportCursors() {
@@ -191,13 +191,6 @@ abstract class NuanceSourceDefinition extends Phobject {
     $editor->applyTransactions($item, $xactions);
 
     return $item;
-  }
-
-  public function renderItemViewProperties(
-    PhabricatorUser $viewer,
-    NuanceItem $item,
-    PHUIPropertyListView $view) {
-    return;
   }
 
   public function renderItemEditProperties(

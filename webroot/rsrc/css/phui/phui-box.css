@@ -66,10 +66,6 @@
   padding: 0;
 }
 
-.phui-box.phui-box-blue-property .phui-header-header {
-  text-transform: uppercase;
-}
-
 .phui-box.phui-box-blue-property .phui-header-header .phui-header-icon {
   margin-right: 6px;
 }
@@ -97,4 +93,8 @@
 .phui-box.phui-box-blue-property .phui-header-header {
   font-size: 13px;
   color: {$bluetext};
+}
+
+.phui-box-blue-property .phui-object-item-list-view.phui-object-list-flush {
+  padding: 2px 8px;
 }

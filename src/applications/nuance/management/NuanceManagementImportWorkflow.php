@@ -6,7 +6,7 @@ final class NuanceManagementImportWorkflow
   protected function didConstruct() {
     $this
       ->setName('import')
-      ->setExamples('**import** [__options__]')
+      ->setExamples('**import** --source __source__ [__options__]')
       ->setSynopsis(pht('Import data from a source.'))
       ->setArguments(
         array(
@@ -14,6 +14,11 @@ final class NuanceManagementImportWorkflow
             'name' => 'source',
             'param' => 'source',
             'help' => pht('Choose which source to import.'),
+          ),
+          array(
+            'name' => 'cursor',
+            'param' => 'cursor',
+            'help' => pht('Import only a particular cursor.'),
           ),
         ));
   }
@@ -38,6 +43,36 @@ final class NuanceManagementImportWorkflow
         pht(
           'This source ("%s") does not have any import cursors.',
           $source->getName()));
+    }
+
+    $select = $args->getArg('cursor');
+    if (strlen($select)) {
+      if (empty($cursors[$select])) {
+        throw new PhutilArgumentUsageException(
+          pht(
+            'This source ("%s") does not have a "%s" cursor. Available '.
+            'cursors: %s.',
+            $source->getName(),
+            $select,
+            implode(', ', array_keys($cursors))));
+      } else {
+        echo tsprintf(
+          "%s\n",
+          pht(
+            'Importing cursor "%s" only.',
+            $select));
+        $cursors = array_select_keys($cursors, array($select));
+      }
+    } else {
+      echo tsprintf(
+        "%s\n",
+        pht(
+          'Importing all cursors: %s.',
+          implode(', ', array_keys($cursors))));
+
+      echo tsprintf(
+        "%s\n",
+        pht('(Use --cursor to import only a particular cursor.)'));
     }
 
     foreach ($cursors as $cursor) {
