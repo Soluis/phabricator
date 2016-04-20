@@ -162,9 +162,15 @@ final class DiffusionRepositoryCreateController
 
           $activate = $form->getPage('done')
             ->getControl('activate')->getValue();
+          if ($activate == 'start') {
+            $initial_status = PhabricatorRepository::STATUS_ACTIVE;
+          } else {
+            $initial_status = PhabricatorRepository::STATUS_INACTIVE;
+          }
+
           $xactions[] = id(clone $template)
             ->setTransactionType($type_activate)
-            ->setNewValue(($activate == 'start'));
+            ->setNewValue($initial_status);
 
           if ($service) {
             $xactions[] = id(clone $template)
@@ -262,10 +268,26 @@ final class DiffusionRepositoryCreateController
     $crumbs = $this->buildApplicationCrumbs();
     $crumbs->addTextCrumb($title);
 
+    $header = id(new PHUIHeaderView())
+      ->setHeader($title)
+      ->setHeaderIcon('fa-pencil');
+
+    $form_box = id(new PHUIObjectBoxView())
+      ->setHeaderText($title)
+      ->setBackground(PHUIObjectBoxView::BLUE_PROPERTY)
+      ->setForm($form);
+
+    $view = id(new PHUITwoColumnView())
+      ->setHeader($header)
+      ->setFooter(array(
+        $form,
+      ));
+
     return $this->newPage()
       ->setTitle($title)
       ->setCrumbs($crumbs)
-      ->appendChild($form);
+      ->appendChild($view);
+
   }
 
 

@@ -87,14 +87,6 @@ final class NuanceItem
     return '/nuance/item/view/'.$this->getID().'/';
   }
 
-  public function getRequestor() {
-    return $this->assertAttached($this->requestor);
-  }
-
-  public function attachRequestor(NuanceRequestor $requestor) {
-    return $this->requestor = $requestor;
-  }
-
   public function getSource() {
     return $this->assertAttached($this->source);
   }
@@ -152,6 +144,23 @@ final class NuanceItem
       array(
         'objectPHID' => $this->getPHID(),
       ));
+  }
+
+  public function issueCommand(
+    $author_phid,
+    $command,
+    array $parameters = array()) {
+
+    $command = id(NuanceItemCommand::initializeNewCommand())
+      ->setItemPHID($this->getPHID())
+      ->setAuthorPHID($author_phid)
+      ->setCommand($command)
+      ->setParameters($parameters)
+      ->save();
+
+    $this->scheduleUpdate();
+
+    return $this;
   }
 
   public function getImplementation() {

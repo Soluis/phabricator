@@ -43,6 +43,8 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
           $this->getQueryRoutePattern() => 'NuanceItemListController',
           'view/(?P<id>[1-9]\d*)/' => 'NuanceItemViewController',
           'manage/(?P<id>[1-9]\d*)/' => 'NuanceItemManageController',
+          'action/(?P<id>[1-9]\d*)/(?P<action>[^/]+)/'
+            => 'NuanceItemActionController',
         ),
         'source/' => array(
           $this->getQueryRoutePattern() => 'NuanceSourceListController',
@@ -53,11 +55,6 @@ final class PhabricatorNuanceApplication extends PhabricatorApplication {
           $this->getQueryRoutePattern() => 'NuanceQueueListController',
           $this->getEditRoutePattern('edit/') => 'NuanceQueueEditController',
           'view/(?P<id>[1-9]\d*)/' => 'NuanceQueueViewController',
-        ),
-        'requestor/' => array(
-          'view/(?P<id>[1-9]\d*)/' => 'NuanceRequestorViewController',
-          'edit/(?P<id>[1-9]\d*)/' => 'NuanceRequestorEditController',
-          'new/'                   => 'NuanceRequestorEditController',
         ),
       ),
       '/action/' => array(

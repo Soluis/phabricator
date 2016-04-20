@@ -51,11 +51,10 @@ final class PhabricatorHomeMainController extends PhabricatorHomeController {
       $content = $nav;
     }
 
-    return $this->buildApplicationPage(
-      $content,
-      array(
-        'title' => 'Soluis Dev Portal',
-      ));
+    return $this->newPage()
+      ->setTitle('Soluis Dev Portal')
+      ->appendChild($content);
+
   }
 
   private function buildMainResponse(array $projects) {
